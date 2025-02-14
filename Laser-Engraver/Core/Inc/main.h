@@ -60,29 +60,30 @@ void Error_Handler(void);
 #define B1_Pin GPIO_PIN_13
 #define B1_GPIO_Port GPIOC
 #define B1_EXTI_IRQn EXTI15_10_IRQn
-#define YPUL_Pin GPIO_PIN_1
-#define YPUL_GPIO_Port GPIOC
-#define XDIR_Pin GPIO_PIN_1
-#define XDIR_GPIO_Port GPIOA
 #define USART_TX_Pin GPIO_PIN_2
 #define USART_TX_GPIO_Port GPIOA
 #define USART_RX_Pin GPIO_PIN_3
 #define USART_RX_GPIO_Port GPIOA
-#define XPUL_Pin GPIO_PIN_4
-#define XPUL_GPIO_Port GPIOA
 #define LD2_Pin GPIO_PIN_5
 #define LD2_GPIO_Port GPIOA
-#define test_interrupt_Pin GPIO_PIN_6
-#define test_interrupt_GPIO_Port GPIOA
-#define test_interrupt_EXTI_IRQn EXTI9_5_IRQn
-#define YDIR_Pin GPIO_PIN_0
-#define YDIR_GPIO_Port GPIOB
+#define YPUL_Pin GPIO_PIN_10
+#define YPUL_GPIO_Port GPIOB
+#define YEN_Pin GPIO_PIN_8
+#define YEN_GPIO_Port GPIOA
+#define YDIR_Pin GPIO_PIN_9
+#define YDIR_GPIO_Port GPIOA
+#define XPUL_Pin GPIO_PIN_10
+#define XPUL_GPIO_Port GPIOA
 #define TMS_Pin GPIO_PIN_13
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
+#define XDIR_Pin GPIO_PIN_4
+#define XDIR_GPIO_Port GPIOB
+#define XEN_Pin GPIO_PIN_5
+#define XEN_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

@@ -18,11 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,58 +42,33 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
-
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
 
-/* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for turnXMotor */
-osThreadId_t turnXMotorHandle;
-const osThreadAttr_t turnXMotor_attributes = {
-  .name = "turnXMotor",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-};
-/* Definitions for turnYMotor */
-osThreadId_t turnYMotorHandle;
-const osThreadAttr_t turnYMotor_attributes = {
-  .name = "turnYMotor",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
-};
 /* USER CODE BEGIN PV */
-int Xcurrent = 0; // current X coordinate of laser
-int Ycurrent = 0; // current Y coordinate of laser
-int XDIR;
-int YDIR;
-int YMotorTime = 1000;
-int XMotorTime = 1000;
-int Xend = 100;
-int Yend = 100;
+int Xcurrent = 0; // current X coordinate of laser (units of .1mm)
+int Ycurrent = 0; // current Y coordinate of laser (units of .1mm)
+int XDIR = 1;	// X motor Direction (1 is increasing X coordinate, 0 is decreasing)
+int YDIR = 1;	// Y motor Direction (1 is increasing Y coordinate, 0 is decreasing)
+int Xend = 0; // End coordinate for the X motor (units of .1mm)
+int Yend = 0; // End coordinate for the Y motor (units of .1mm)
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
-void StartDefaultTask(void *argument);
-void StartXMotor(void *argument);
-void StartYMotor(void *argument);
-
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
+void GcommandExecute(char[], char[], char[], char[], char[], char[]);
+void GcommandParse(char[]);
+void addChar(char*,char);
+void laserEngrave(int, int);
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -130,87 +106,53 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  MX_ADC1_Init();
   MX_TIM16_Init();
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
+  HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
+  HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
 
+  // Tests the GcommandParse function
+  //GcommandParse("G0 X0.0000 Y0.0000 Z1.5000 F5000 S0\n");
   /* USER CODE END 2 */
-
-  /* Init scheduler */
-  osKernelInitialize();
-
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
-
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
-
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
-
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
-
-  /* Create the thread(s) */
-  /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* creation of turnXMotor */
-  turnXMotorHandle = osThreadNew(StartXMotor, NULL, &turnXMotor_attributes);
-
-  /* creation of turnYMotor */
-  turnYMotorHandle = osThreadNew(StartYMotor, NULL, &turnYMotor_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
-  osThreadNew(StartXMotor, "Start X Motor", &turnXMotor_attributes);
-  osThreadNew(StartYMotor, "Start Y Motor", &turnYMotor_attributes);
-  /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
-
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  /**
-	  //starts the ADC timer
-	  HAL_ADC_Start(&hadc1);
-	  //Waits for the conversion to finish
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  // Reads the value of the ADC and saves it in potValue
-	  int potValue = HAL_ADC_GetValue(&hadc1);
 
-	  HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);
-	  // Waits between .1 and 1 second for next pulse
-	  HAL_Delay((800 + potValue) / 8);
-	  **/
+	  // Test code to turn both motors forward 10000 steps with prescaler at 100, then back with half speed with .5 second delays in between
+	  Xend = 10000;
+	  Yend = 10000;
+	  XDIR = 1;	// sets the global variable for XDIR to 0 (decreasing X coordinate
+	  YDIR = 1;	// sets the gobal variable for YDIR to 0 (decreasing Y coordinate
+	  __HAL_TIM_SET_PRESCALER(&htim16,100);	// sets the prescaler to 100 (1 revolution per second)
+	  __HAL_TIM_SET_PRESCALER(&htim17,100);
+	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,1);	// Sets the direction to decreasing X and Y coordinate
+	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,1);
 
-	  /**
-	  int numberoflines = 0;
-	  for(int i = 0; i<numberoflines; i++)
-	  {
+	  // Starts the timers to pulse the X and Y motors
+	  HAL_TIM_Base_Start_IT(&htim16);
+	  HAL_TIM_Base_Start_IT(&htim17);
 
-	  }
-	  **/
-	  Xend = 100;
-	  Yend = 100;
-	  MotorStraightLine();
+	  while((Xcurrent != Xend) && (Ycurrent != Yend)){} // Waits for the motors to be done
+	  HAL_Delay(500);	// Creates a .5 second delay to pause the motors
+
+	  // Repeats the process but changes the direction and halves the speed
 	  Xend = 0;
 	  Yend = 0;
-	  MotorStraightLine();
+	  XDIR = 0;
+	  YDIR = 0;
+	  __HAL_TIM_SET_PRESCALER(&htim16, 50);
+	  __HAL_TIM_SET_PRESCALER(&htim17, 50);
+	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,1);
+	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,1);
+
+
+	  HAL_TIM_Base_Start_IT(&htim16);
+	  HAL_TIM_Base_Start_IT(&htim17);
+	  while((Xcurrent != Xend) && (Ycurrent != Yend)){}
+	  HAL_Delay(500);
 
     /* USER CODE END WHILE */
 
@@ -269,73 +211,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief ADC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ADC1_Init(void)
-{
-
-  /* USER CODE BEGIN ADC1_Init 0 */
-
-  /* USER CODE END ADC1_Init 0 */
-
-  ADC_MultiModeTypeDef multimode = {0};
-  ADC_ChannelConfTypeDef sConfig = {0};
-
-  /* USER CODE BEGIN ADC1_Init 1 */
-
-  /* USER CODE END ADC1_Init 1 */
-
-  /** Common config
-  */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure the ADC multi-mode
-  */
-  multimode.Mode = ADC_MODE_INDEPENDENT;
-  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
-  sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN ADC1_Init 2 */
-
-  /* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
   * @brief TIM16 Initialization Function
   * @param None
   * @retval None
@@ -351,9 +226,9 @@ static void MX_TIM16_Init(void)
 
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 8000;
+  htim16.Init.Prescaler = 1000;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim16.Init.Period = 50;
+  htim16.Init.Period = 250;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim16.Init.RepetitionCounter = 0;
   htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -383,9 +258,9 @@ static void MX_TIM17_Init(void)
 
   /* USER CODE END TIM17_Init 1 */
   htim17.Instance = TIM17;
-  htim17.Init.Prescaler = 8000;
+  htim17.Init.Prescaler = 1000;
   htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim17.Init.Period = 50;
+  htim17.Init.Period = 250;
   htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim17.Init.RepetitionCounter = 0;
   htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -452,13 +327,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(YPUL_GPIO_Port, YPUL_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, XDIR_Pin|XPUL_Pin|LD2_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, YPUL_Pin|XDIR_Pin|XEN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, YEN_Pin|YDIR_Pin|XPUL_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -466,38 +341,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : YPUL_Pin */
-  GPIO_InitStruct.Pin = YPUL_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(YPUL_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : XDIR_Pin XPUL_Pin LD2_Pin */
-  GPIO_InitStruct.Pin = XDIR_Pin|XPUL_Pin|LD2_Pin;
+  /*Configure GPIO pins : LD2_Pin YEN_Pin YDIR_Pin XPUL_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin|YEN_Pin|YDIR_Pin|XPUL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : test_interrupt_Pin */
-  GPIO_InitStruct.Pin = test_interrupt_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(test_interrupt_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : YDIR_Pin */
-  GPIO_InitStruct.Pin = YDIR_Pin;
+  /*Configure GPIO pins : YPUL_Pin XDIR_Pin XEN_Pin */
+  GPIO_InitStruct.Pin = YPUL_Pin|XDIR_Pin|XEN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(YDIR_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -505,116 +364,152 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void MotorStraightLine() {
-	if (Xend > Xcurrent){
+
+void GcommandParse(char line1[])
+{
+
+	  // Creates local variables for the different possible commands in Gcode (max 10 characters)
+	  char Gcommand[10] = "";
+	  char Mcommand[10] = "";
+	  char Xcoordinate[10] = "";
+	  char Ycoordinate[10] = "";
+	  char Zcoordinate[10] = "";
+	  char feedRate[10] = "";
+	  char laserSpeed[10] = "";
+
+	  // Initiates a for loop which loops each character of the Gcode line
+	  for (int i = 0; i < strlen(line1); i++)
+	  {
+
+		  // Creates a temporary variable for the Gcode command and the value attached to it
+		  char command = line1[i];	// assigns the first value of the Gcode as the command
+		  char newValue[10] = "";
+
+		  int j = 0;
+		  i++;
+
+		  while (line1[i] != ' ' && line1[i] != '\0')	// while loop that loops through the rest of the command and stores the value in newValue
+		  {
+
+			  newValue[j] = line1[i];
+			  i++;
+			  j++;
+		  }
+		  newValue[j] = '\0';	//adds the null operator to the end of the newValue
+
+		  // Switch statement for the value of command to split the current word into it's variable
+		  switch (command)
+		  {
+		  case 'G':
+			  strncpy(Gcommand, newValue, 10);	// copies the value in newValue to the Gcommand variable
+				break;
+		  case 'X':
+			  strncpy(Xcoordinate, newValue, 10);	// copies the value in newValue to the Xcoordinate variable
+				break;
+		  case 'Y':
+			  strncpy(Ycoordinate, newValue, 10);	// copies the value in newValue to the Ycoordinate variable
+				break;
+		  case 'Z':
+			  strncpy(Zcoordinate, newValue, 10);	// copies the value in newValue to the Zcoordinate variable
+				break;
+		  case 'M':
+			  strncpy(Mcommand, newValue, 10);	// copies the value in newValue to the Mcommand variable
+				break;
+		  case 'S':
+			  strncpy(laserSpeed, newValue, 10);	// copies the value in newValue to the laserSpeed variable
+				break;
+		  case 'F':
+			  strncpy(feedRate, newValue, 10);	// copies the value in newValue to the feedRate variable
+				break;
+		  case 'R':
+				break;
+		  default:
+				break;
+		  }
+	  }
+
+	  GcommandExecute(Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);	// Calls the Gcommand Execute function which will execute the given command
+}
+
+// function which adds a char to the end of a char array
+void addChar(char *s, char c)
+{
+	while (*s++);
+
+	*(s - 1) = c;
+
+	*s = '\0';
+}
+
+// Command Execute takes the parameters from the Gcode line and controls the motors accordingly
+void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zcommand[], char feedRate[], char laserSpeed[])
+{
+
+	if (strcmp(Gcommand,"0") == 0)	// If the Gcode command is G0, runs with rapid positioning (full speed move)
+	{
+
+		Xend = 10 * atof(Xcommand);	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
+		Yend = 10 * atof(Ycommand);	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
+		int feed = atoi(feedRate);	// Converts feedRate to an int
+		int laser = atoi(laserSpeed);	// Converts laserSpeed to an int
+		laserEngrave(feed, laser);	// Calls the laserEngrave function
+
+	}
+
+	if (strcmp(Gcommand,"1")==0)	// Linear interpolation command
+	{
+	}
+
+	// We'll need to add all of the G commands here
+
+}
+
+
+void laserEngrave(int feedRate, int laserSpeed)
+{
+	// Calculates distance to be traveled
+	int Xdistance = Xend - Xcurrent;
+	int Ydistance = Yend - Ycurrent;
+
+	// Updates the Direction variable and writes to the pin
+	if (Xdistance > 0)
+	{
 		XDIR = 1;
 		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
-	} else {
-		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+	} else
+	{
 		XDIR = 0;
+		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
 	}
-	if (Yend > Ycurrent){
+
+	if (Ydistance > 0)
+	{
 		YDIR = 1;
 		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
-	} else {
+	} else
+	{
 		YDIR = 0;
 		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
 	}
 
-	//osThreadResume(turnXMotorHandle);
-	//osThreadResume(turnYMotorHandle);
+	// Updates the prescaler ( I need to put in a calculation based on speed into the prescaler value
+	__HAL_TIM_SET_PRESCALER(&htim16,800);
+	__HAL_TIM_SET_PRESCALER(&htim17,800);
 
+	// Starts the motor timers
+	  HAL_TIM_Base_Start_IT(&htim16);
+	  HAL_TIM_Base_Start_IT(&htim17);
+
+	  while((Xcurrent != Xend) && (Ycurrent != Yend)){}	// Waits for the motors to be done before proceeding
+}
+
+PUTCHAR_PROTOTYPE
+{
+	HAL_UART_Transmit(&huart2, (uint8_t *) &ch, 1, 0xFFFF);
+	return ch;
 }
 
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN 5 */
-
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-	Xend = 100;
-	Yend = 100;
-	XDIR = 1;
-	YDIR = 1;
-	osDelay(1000);
-  }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartXMotor */
-/**
-* @brief Function implementing the turnXMotor thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartXMotor */
-void StartXMotor(void *argument)
-{
-  /* USER CODE BEGIN StartXMotor */
-  /* Infinite loop */
-  for(;;)
-  {
-	if (Xend != Xcurrent){
-		HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);
-	    osDelay(XMotorTime/2);
-	    HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);
-	    osDelay(XMotorTime/2);
-	    if (XDIR == 0)
-	    {
-	    	Xcurrent -= 1;
-	    }
-	    else
-	    {
-	    	Xcurrent += 1;
-	    }
-	}
-	osDelay(1);
-  }
-  /* USER CODE END StartXMotor */
-}
-
-/* USER CODE BEGIN Header_StartYMotor */
-/**
-* @brief Function implementing the turnYmotor thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartYMotor */
-void StartYMotor(void *argument)
-{
-  /* USER CODE BEGIN StartYMotor */
-  /* Infinite loop */
-  for(;;)
-  {
-	if (Yend != Ycurrent){
-		HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);
-		osDelay(YMotorTime/2);
-		HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);
-		osDelay(YMotorTime/2);
-		if (YDIR == 0)
-		{
-			Ycurrent -= 1;
-		}
-		else
-		{
-			Ycurrent += 1;
-		}
-	}
-	osDelay(1);
-  }
-  /* USER CODE END StartYMotor */
-}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
@@ -628,31 +523,58 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 
+	if (htim == &htim16)	// X motor timer
+	{
+
+		if (Xcurrent != Xend)	// Evaluates if the X motor has arrived in it's position
+		{
+
+			HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);	// Toggles the XPUL pin
+
+			// Increments the Xcurrent value if XDIR is positive and decrements if Xcurrent value is negative
+			if (XDIR == 1)
+			{
+				Xcurrent++;
+			}
+			else
+			{
+				Xcurrent--;
+			}
+		}
+		else
+		{
+			HAL_TIM_Base_Stop_IT(&htim17);	// Once the X motor arrives to it's final position, this stops the timer
+		}
+	}
+
+	if (htim == &htim17)	// Y motor timer
+	{
+
+		if (Ycurrent != Yend)	// Evaluates if the Y motor has arrived in it's position
+		{
+
+			HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);	// Toggles the YPUL pin
+
+			// Increments the Ycurrent value if YDIR is positive and decrements if Ycurrent value is negative
+			if (YDIR == 1)
+			{
+				Ycurrent++;
+			}
+			else
+			{
+				Ycurrent--;
+			}
+		}
+		else
+		{
+		  HAL_TIM_Base_Stop_IT(&htim16);	// Once the Y motor arrives to it's final position, this stops the timer
+		}
+	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM3) {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-	if (htim == &htim16)
-	{
-		HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);
-		if (XDIR == 1)
-		{
-			Xcurrent ++;
-		} else {
-			Xcurrent --;
-		}
-	}
-	if (htim == &htim17)
-	{
-		HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);
-		if (YDIR == 1)
-		{
-			Ycurrent ++;
-		} else {
-			Ycurrent --;
-		}
-	}
   /* USER CODE END Callback 1 */
 }
 
