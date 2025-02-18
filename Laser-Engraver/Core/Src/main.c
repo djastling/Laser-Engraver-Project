@@ -122,8 +122,8 @@ int main(void)
   {
 
 	  // Test code to turn both motors forward 10000 steps with prescaler at 100, then back with half speed with .5 second delays in between
-	  Xend = 10000;
-	  Yend = 10000;
+	  Xend = 3200;
+	  Yend = 3200;
 	  XDIR = 1;	// sets the global variable for XDIR to 0 (decreasing X coordinate
 	  YDIR = 1;	// sets the gobal variable for YDIR to 0 (decreasing Y coordinate
 	  __HAL_TIM_SET_PRESCALER(&htim16,100);	// sets the prescaler to 100 (1 revolution per second)
@@ -145,8 +145,8 @@ int main(void)
 	  YDIR = 0;
 	  __HAL_TIM_SET_PRESCALER(&htim16, 50);
 	  __HAL_TIM_SET_PRESCALER(&htim17, 50);
-	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,1);
-	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,1);
+	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,0);
+	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,0);
 
 
 	  HAL_TIM_Base_Start_IT(&htim16);
@@ -341,6 +341,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : shutdownButton_Pin */
+  GPIO_InitStruct.Pin = shutdownButton_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(shutdownButton_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pins : LD2_Pin YEN_Pin YDIR_Pin XPUL_Pin */
   GPIO_InitStruct.Pin = LD2_Pin|YEN_Pin|YDIR_Pin|XPUL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -356,6 +362,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 15, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
@@ -364,6 +373,20 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+
+	if (GPIO_Pin == shutdownButton_Pin)
+	{
+		HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
+		HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
+
+		HAL_TIM_Base_Stop_IT(&htim16);
+		HAL_TIM_Base_Stop_IT(&htim17);
+
+		while(1){}
+
+	}
+}
 
 void GcommandParse(char line1[])
 {
@@ -493,6 +516,7 @@ void laserEngrave(int feedRate, int laserSpeed)
 	}
 
 	// Updates the prescaler ( I need to put in a calculation based on speed into the prescaler value
+	int prescaler = .614581 * 2;
 	__HAL_TIM_SET_PRESCALER(&htim16,800);
 	__HAL_TIM_SET_PRESCALER(&htim17,800);
 
