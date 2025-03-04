@@ -67,10 +67,10 @@ void Error_Handler(void);
 #define USART_TX_GPIO_Port GPIOA
 #define USART_RX_Pin GPIO_PIN_3
 #define USART_RX_GPIO_Port GPIOA
-#define LD2_Pin GPIO_PIN_5
-#define LD2_GPIO_Port GPIOA
 #define YPUL_Pin GPIO_PIN_10
 #define YPUL_GPIO_Port GPIOB
+#define SPI1_CD_Pin GPIO_PIN_7
+#define SPI1_CD_GPIO_Port GPIOC
 #define YEN_Pin GPIO_PIN_8
 #define YEN_GPIO_Port GPIOA
 #define YDIR_Pin GPIO_PIN_9
@@ -87,8 +87,11 @@ void Error_Handler(void);
 #define XDIR_GPIO_Port GPIOB
 #define XEN_Pin GPIO_PIN_5
 #define XEN_GPIO_Port GPIOB
+#define SPI1_CS_Pin GPIO_PIN_6
+#define SPI1_CS_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+#define SD_SPI_HANDLE hspi1
 
 /* USER CODE END Private defines */
 

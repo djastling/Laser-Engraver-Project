@@ -18,12 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
+#include <stdarg.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,18 +45,23 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+SPI_HandleTypeDef hspi1;
+
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+void myprintf(const char *fmt, ...);
 int Xcurrent = 0; // current X coordinate of laser (units of .1mm)
 int Ycurrent = 0; // current Y coordinate of laser (units of .1mm)
 int XDIR = 1;	// X motor Direction (1 is increasing X coordinate, 0 is decreasing)
 int YDIR = 1;	// Y motor Direction (1 is increasing Y coordinate, 0 is decreasing)
 int Xend = 0; // End coordinate for the X motor (units of .1mm)
 int Yend = 0; // End coordinate for the Y motor (units of .1mm)
+int feed = 0;
+int laserSpeed = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,10 +70,12 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
+static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
 void GcommandExecute(char[], char[], char[], char[], char[], char[]);
-void GcommandParse(char[]);
+void McommandExecute(char[]);
+void GcommandParse(TCHAR* buff);
 void addChar(char*,char);
 void laserEngrave(int, int);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
@@ -73,6 +83,19 @@ void laserEngrave(int, int);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void myprintf(const char *fmt, ...)
+{
+	static char buffer[256];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
+	va_end(args);
+
+	int len = strlen(buffer);
+	HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, -1);
+
+}
 
 /* USER CODE END 0 */
 
@@ -108,52 +131,54 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM16_Init();
   MX_TIM17_Init();
+  MX_SPI1_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  	  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
+
+      HAL_Delay(1000); //a short delay is important to let the SD card settle
+
+      //some variables for FatFs
+      FATFS FatFs; 	//Fatfs handle
+      FIL fil; 		//File handle
+      FRESULT fres; //Result after operations
+
+      //Open the file system
+      fres = f_mount(&FatFs, "", 1); //1=mount now
+      if (fres != FR_OK) {
+    	myprintf("f_mount error (%i)\r\n", fres);
+    	while(1);
+      }
+
+      fres = f_open(&fil, "test.txt", FA_READ);
+	  if (fres != FR_OK) {
+		myprintf("f_open error (%i)\r\n", fres);
+		while(1);
+	  }
+	  myprintf("I was able to open 'gtest.txt' for reading!\r\n");
+
+
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
 
-  // Tests the GcommandParse function
-  //GcommandParse("G0 X0.0000 Y0.0000 Z1.5000 F5000 S0\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-	  // Test code to turn both motors forward 10000 steps with prescaler at 100, then back with half speed with .5 second delays in between
-	  Xend = 3200;
-	  Yend = 3200;
-	  XDIR = 1;	// sets the global variable for XDIR to 0 (decreasing X coordinate
-	  YDIR = 1;	// sets the gobal variable for YDIR to 0 (decreasing Y coordinate
-	  __HAL_TIM_SET_PRESCALER(&htim16,100);	// sets the prescaler to 100 (1 revolution per second)
-	  __HAL_TIM_SET_PRESCALER(&htim17,100);
-	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,1);	// Sets the direction to decreasing X and Y coordinate
-	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,1);
-
-	  // Starts the timers to pulse the X and Y motors
-	  HAL_TIM_Base_Start_IT(&htim16);
-	  HAL_TIM_Base_Start_IT(&htim17);
-
-	  while((Xcurrent != Xend) && (Ycurrent != Yend)){} // Waits for the motors to be done
-	  HAL_Delay(500);	// Creates a .5 second delay to pause the motors
-
-	  // Repeats the process but changes the direction and halves the speed
-	  Xend = 0;
-	  Yend = 0;
-	  XDIR = 0;
-	  YDIR = 0;
-	  __HAL_TIM_SET_PRESCALER(&htim16, 50);
-	  __HAL_TIM_SET_PRESCALER(&htim17, 50);
-	  HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin,0);
-	  HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin,0);
-
-
-	  HAL_TIM_Base_Start_IT(&htim16);
-	  HAL_TIM_Base_Start_IT(&htim17);
-	  while((Xcurrent != Xend) && (Ycurrent != Yend)){}
-	  HAL_Delay(500);
-
+	  if (HAL_GPIO_ReadPin(SPI1_CD_GPIO_Port, SPI1_CD_Pin))
+	  {
+		  BYTE readBuf[100];
+		  TCHAR* rres = f_gets((TCHAR*)readBuf, 100, &fil);
+		  if(rres != 0) {
+			  GcommandParse((TCHAR*)readBuf);
+		  } else {
+			f_close(&fil);
+			f_mount(NULL, "", 0);
+			while(1){}
+		  }
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -211,6 +236,46 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 7;
+  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
   * @brief TIM16 Initialization Function
   * @param None
   * @retval None
@@ -228,7 +293,7 @@ static void MX_TIM16_Init(void)
   htim16.Instance = TIM16;
   htim16.Init.Prescaler = 1000;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim16.Init.Period = 250;
+  htim16.Init.Period = 400;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim16.Init.RepetitionCounter = 0;
   htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -260,7 +325,7 @@ static void MX_TIM17_Init(void)
   htim17.Instance = TIM17;
   htim17.Init.Prescaler = 1000;
   htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim17.Init.Period = 250;
+  htim17.Init.Period = 400;
   htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim17.Init.RepetitionCounter = 0;
   htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -327,13 +392,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, YPUL_Pin|XDIR_Pin|XEN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, YEN_Pin|YDIR_Pin|XPUL_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -341,18 +406,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PC0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   /*Configure GPIO pin : shutdownButton_Pin */
   GPIO_InitStruct.Pin = shutdownButton_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(shutdownButton_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : LD2_Pin YEN_Pin YDIR_Pin XPUL_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin|YEN_Pin|YDIR_Pin|XPUL_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : YPUL_Pin XDIR_Pin XEN_Pin */
   GPIO_InitStruct.Pin = YPUL_Pin|XDIR_Pin|XEN_Pin;
@@ -360,6 +424,26 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SPI1_CD_Pin */
+  GPIO_InitStruct.Pin = SPI1_CD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(SPI1_CD_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : YEN_Pin YDIR_Pin XPUL_Pin */
+  GPIO_InitStruct.Pin = YEN_Pin|YDIR_Pin|XPUL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SPI1_CS_Pin */
+  GPIO_InitStruct.Pin = SPI1_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI0_IRQn, 15, 0);
@@ -388,20 +472,20 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	}
 }
 
-void GcommandParse(char line1[])
+void GcommandParse(TCHAR* line1)
 {
 
 	  // Creates local variables for the different possible commands in Gcode (max 10 characters)
 	  char Gcommand[10] = "";
-	  char Mcommand[10] = "";
 	  char Xcoordinate[10] = "";
 	  char Ycoordinate[10] = "";
 	  char Zcoordinate[10] = "";
 	  char feedRate[10] = "";
 	  char laserSpeed[10] = "";
 
+	  int i = 0;
 	  // Initiates a for loop which loops each character of the Gcode line
-	  for (int i = 0; i < strlen(line1); i++)
+	  while (1)
 	  {
 
 		  // Creates a temporary variable for the Gcode command and the value attached to it
@@ -411,7 +495,7 @@ void GcommandParse(char line1[])
 		  int j = 0;
 		  i++;
 
-		  while (line1[i] != ' ' && line1[i] != '\0')	// while loop that loops through the rest of the command and stores the value in newValue
+		  while ((line1[i] != ' ') && (line1[i] != '\0') && (line1[i] != '\n'))	// while loop that loops through the rest of the command and stores the value in newValue
 		  {
 
 			  newValue[j] = line1[i];
@@ -436,7 +520,7 @@ void GcommandParse(char line1[])
 			  strncpy(Zcoordinate, newValue, 10);	// copies the value in newValue to the Zcoordinate variable
 				break;
 		  case 'M':
-			  strncpy(Mcommand, newValue, 10);	// copies the value in newValue to the Mcommand variable
+			  strncpy(Gcommand, newValue, 10);	// copies the value in newValue to the Mcommand variable
 				break;
 		  case 'S':
 			  strncpy(laserSpeed, newValue, 10);	// copies the value in newValue to the laserSpeed variable
@@ -449,9 +533,17 @@ void GcommandParse(char line1[])
 		  default:
 				break;
 		  }
+		  if (line1[i] == '\n')
+			  break;
+		  i++;
 	  }
-
-	  GcommandExecute(Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);	// Calls the Gcommand Execute function which will execute the given command
+	  if (strcmp(Gcommand,"G")){
+		  GcommandExecute(Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);	// Calls the Gcommand Execute function which will execute the given command
+		  myprintf("Gcommand: %s Xcoordinate: %s Ycoordinate: %s Zcoordinate: %s feedRate: %s laserSpeed %s\n", Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);
+	  }
+	  else if (strcmp(Gcommand,"M")){
+		  McommandExecute(Gcommand);
+	  }
 }
 
 // function which adds a char to the end of a char array
@@ -468,63 +560,99 @@ void addChar(char *s, char c)
 void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zcommand[], char feedRate[], char laserSpeed[])
 {
 
-	if (strcmp(Gcommand,"0") == 0)	// If the Gcode command is G0, runs with rapid positioning (full speed move)
+	if ((!strcmp(Gcommand,"0")) || (!strcmp(Gcommand,"1")))	// If the Gcode command is G0, runs with rapid positioning (full speed move)
 	{
+		if (Xcommand[0] != '\0')
+		{
+			Xend = ((1600 / 43.39) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
+		} else
+		{
+			Xend = Xcurrent;
+		}
+		if (Ycommand[0] != '\0')
+		{
+			Yend = ((1600 / 43.39) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
+		} else
+		{
+			Yend = Ycurrent;
+		}
 
-		Xend = 10 * atof(Xcommand);	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
-		Yend = 10 * atof(Ycommand);	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
-		int feed = atoi(feedRate);	// Converts feedRate to an int
+		// Calculates distance to be traveled
+		float Xdistance = Xend - Xcurrent;
+		float Ydistance = Yend - Ycurrent;
+
+		// Updates the Direction variable and writes to the pin
+		if (Xdistance > 0)
+		{
+			XDIR = 1;
+			HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
+		} else if (Xdistance < 0)
+		{
+			XDIR = 0;
+			HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+		}
+
+		if (Ydistance > 0)
+		{
+			YDIR = 1;
+			HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
+		} else if (Ydistance < 0)
+		{
+			YDIR = 0;
+			HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
+		}
+
 		int laser = atoi(laserSpeed);	// Converts laserSpeed to an int
-		laserEngrave(feed, laser);	// Calls the laserEngrave function
 
-	}
+		if (feedRate[0] != '\0')
+		{
+			feed = atoi(feedRate);	// Converts feedRate to an int
+		}
 
-	if (strcmp(Gcommand,"1")==0)	// Linear interpolation command
-	{
+		laserEngrave(Xdistance, Ydistance);	// Calls the laserEngrave function
+
 	}
 
 	// We'll need to add all of the G commands here
 
 }
 
-
-void laserEngrave(int feedRate, int laserSpeed)
+void McommandExecute(char Mcommand[])
 {
-	// Calculates distance to be traveled
-	int Xdistance = Xend - Xcurrent;
-	int Ydistance = Yend - Ycurrent;
+	if ((Mcommand[1] == '5') && Mcommand[2] == '\0')
+	{
+		// Add code that turns the laser off
+	}
+	if ((Mcommand[1] == '3') && ((Mcommand[2] == '\0') || (Mcommand[2] == ' ')))
+	{
+		// Add code to turn laser on and PWM of value specified
+	}
+}
 
-	// Updates the Direction variable and writes to the pin
-	if (Xdistance > 0)
+
+void laserEngrave(int Xdistance, int Ydistance)
+{
+	int Xspeed = 65535;
+	int Yspeed = 65535;
+
+	float totalDistance = sqrt((Xdistance * Xdistance) + (Ydistance * Ydistance));
+	if (Xdistance != 0)
 	{
-		XDIR = 1;
-		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
-	} else
+		Xspeed = 162712.482 / ((abs(Xdistance) / totalDistance) * feed);
+	}
+	if (Ydistance != 0)
 	{
-		XDIR = 0;
-		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+		Yspeed = 162712.482 / ((abs(Ydistance) / totalDistance) * feed);
 	}
 
-	if (Ydistance > 0)
-	{
-		YDIR = 1;
-		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
-	} else
-	{
-		YDIR = 0;
-		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
-	}
-
-	// Updates the prescaler ( I need to put in a calculation based on speed into the prescaler value
-	int prescaler = .614581 * 2;
-	__HAL_TIM_SET_PRESCALER(&htim16,800);
-	__HAL_TIM_SET_PRESCALER(&htim17,800);
+	__HAL_TIM_SET_PRESCALER(&htim16, Xspeed);
+	__HAL_TIM_SET_PRESCALER(&htim17, Yspeed);
 
 	// Starts the motor timers
 	  HAL_TIM_Base_Start_IT(&htim16);
 	  HAL_TIM_Base_Start_IT(&htim17);
 
-	  while((Xcurrent != Xend) && (Ycurrent != Yend)){}	// Waits for the motors to be done before proceeding
+	  while(((Xcurrent == Xend) && (Ycurrent == Yend)) == 0){}	// Waits for the motors to be done before proceeding
 }
 
 PUTCHAR_PROTOTYPE
@@ -556,18 +684,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);	// Toggles the XPUL pin
 
 			// Increments the Xcurrent value if XDIR is positive and decrements if Xcurrent value is negative
-			if (XDIR == 1)
+			// only increments every other cycle
+			if (!HAL_GPIO_ReadPin(XPUL_GPIO_Port, XPUL_Pin))
 			{
-				Xcurrent++;
-			}
-			else
-			{
-				Xcurrent--;
+				if (XDIR == 1)
+				{
+					Xcurrent++;
+				}
+				else
+				{
+					Xcurrent--;
+				}
 			}
 		}
 		else
 		{
-			HAL_TIM_Base_Stop_IT(&htim17);	// Once the X motor arrives to it's final position, this stops the timer
+			HAL_TIM_Base_Stop_IT(&htim16);	// Once the X motor arrives to it's final position, this stops the timer
 		}
 	}
 
@@ -580,18 +712,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);	// Toggles the YPUL pin
 
 			// Increments the Ycurrent value if YDIR is positive and decrements if Ycurrent value is negative
-			if (YDIR == 1)
+			if (!HAL_GPIO_ReadPin(YPUL_GPIO_Port, YPUL_Pin))
 			{
-				Ycurrent++;
-			}
-			else
-			{
-				Ycurrent--;
+				if (YDIR == 1)
+				{
+					Ycurrent++;
+				}
+				else
+				{
+					Ycurrent--;
+				}
 			}
 		}
 		else
 		{
-		  HAL_TIM_Base_Stop_IT(&htim16);	// Once the Y motor arrives to it's final position, this stops the timer
+		  HAL_TIM_Base_Stop_IT(&htim17);	// Once the Y motor arrives to it's final position, this stops the timer
 		}
 	}
   /* USER CODE END Callback 0 */
