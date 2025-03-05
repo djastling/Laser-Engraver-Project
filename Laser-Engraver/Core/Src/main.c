@@ -63,6 +63,7 @@ int Xend = 0; // End coordinate for the X motor (units of .1mm)
 int Yend = 0; // End coordinate for the Y motor (units of .1mm)
 int feed = 0;
 int laserSpeed = 0;
+int setup = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -78,7 +79,8 @@ void GcommandExecute(char[], char[], char[], char[], char[], char[]);
 void McommandExecute(char[]);
 void GcommandParse(TCHAR* buff);
 void addChar(char*,char);
-void laserEngrave(int, int);
+void LaserEngrave(int, int);
+void InitiateMotors();
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
 
@@ -161,6 +163,8 @@ int main(void)
 
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
+
+  InitiateMotors();
 
   /* USER CODE END 2 */
 
@@ -416,7 +420,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : shutdownButton_Pin */
   GPIO_InitStruct.Pin = shutdownButton_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(shutdownButton_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : YPUL_Pin XDIR_Pin XEN_Pin */
@@ -447,7 +451,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 15, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
@@ -458,18 +462,41 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void InitiateMotors()
+{
+	__HAL_TIM_SET_PRESCALER(&htim16, 100);
+	__HAL_TIM_SET_PRESCALER(&htim17, 100);
+
+	// Starts the motor timers
+	  HAL_TIM_Base_Start_IT(&htim16);
+	  HAL_TIM_Base_Start_IT(&htim17);
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 	if (GPIO_Pin == shutdownButton_Pin)
 	{
-		HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
-		HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
+		if (setup == 1)
+		{
+			HAL_TIM_Base_Stop_IT(&htim16);
+			HAL_TIM_Base_Stop_IT(&htim17);
 
-		HAL_TIM_Base_Stop_IT(&htim16);
-		HAL_TIM_Base_Stop_IT(&htim17);
+			feed = 5000;
+			LaserEngrave(50, 50);
+			Xcurrent = 0;
+			Ycurrent = 0;
+		}
+		else
+		{
+			HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
+			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 
-		while(1){}
+			HAL_TIM_Base_Stop_IT(&htim16);
+			HAL_TIM_Base_Stop_IT(&htim17);
 
+			while(1){}
+		}
 	}
 }
 
@@ -610,7 +637,7 @@ void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zco
 			feed = atoi(feedRate);	// Converts feedRate to an int
 		}
 
-		laserEngrave(Xdistance, Ydistance);	// Calls the laserEngrave function
+		LaserEngrave(Xdistance, Ydistance);	// Calls the laserEngrave function
 
 	}
 
@@ -631,7 +658,7 @@ void McommandExecute(char Mcommand[])
 }
 
 
-void laserEngrave(int Xdistance, int Ydistance)
+void LaserEngrave(int Xdistance, int Ydistance)
 {
 	int Xspeed = 65535;
 	int Yspeed = 65535;
@@ -652,6 +679,7 @@ void laserEngrave(int Xdistance, int Ydistance)
 	// Starts the motor timers
 	  HAL_TIM_Base_Start_IT(&htim16);
 	  HAL_TIM_Base_Start_IT(&htim17);
+	  // Here is where the PWM starts
 
 	  while(((Xcurrent == Xend) && (Ycurrent == Yend)) == 0){}	// Waits for the motors to be done before proceeding
 }
