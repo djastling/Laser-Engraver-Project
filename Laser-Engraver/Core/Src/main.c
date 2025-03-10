@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
-// Heyyy
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,6 +47,7 @@
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
@@ -72,6 +72,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
 void GcommandExecute(char[], char[], char[], char[], char[], char[]);
@@ -134,6 +135,7 @@ int main(void)
   MX_TIM17_Init();
   MX_SPI1_Init();
   MX_FATFS_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   	  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
@@ -162,6 +164,7 @@ int main(void)
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
 
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -183,7 +186,20 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  // Gradually increase duty cycle
+	 	  	          for (uint8_t power = 0; power <= 255; power += 5) {
+	 	  	              SetLaserPower(power);
+	 	  	              HAL_Delay(10);
+	 	  	          }
+
+	 	  	          // Gradually decrease duty cycle
+	 	  	          for (uint8_t power = 255; power > 0; power -= 5) {
+	 	  	              SetLaserPower(power);
+	 	  	              HAL_Delay(10);
+	 	  	          }
   }
+
+
   /* USER CODE END 3 */
 }
 
@@ -273,6 +289,55 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 79999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  /* USER CODE END TIM2_Init 2 */
+   HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -543,7 +608,7 @@ void GcommandParse(TCHAR* line1)
 		  myprintf("Gcommand: %s Xcoordinate: %s Ycoordinate: %s Zcoordinate: %s feedRate: %s laserSpeed %s\n", Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);
 	  }
 	  else if (strcmp(Gcommand,"M")){
-		  McommandExecute(Gcommand);
+
 	  }
 }
 
@@ -609,6 +674,9 @@ void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zco
 		{
 			feed = atoi(feedRate);	// Converts feedRate to an int
 		}
+		// Add code to turn laser on and PWM of value specified
+				 laser = atoi(laserSpeed);  // Convert laserSpeed string to integer
+				 SetLaserPower(laser);
 
 		laserEngrave(Xdistance, Ydistance);	// Calls the laserEngrave function
 
@@ -618,16 +686,9 @@ void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zco
 
 }
 
-void McommandExecute(char Mcommand[])
-{
-	if ((Mcommand[1] == '5') && Mcommand[2] == '\0')
-	{
-		// Add code that turns the laser off
-	}
-	if ((Mcommand[1] == '3') && ((Mcommand[2] == '\0') || (Mcommand[2] == ' ')))
-	{
-		// Add code to turn laser on and PWM of value specified
-	}
+
+void SetLaserPower(uint8_t power) {
+    TIM2->CCR1 = power;  // Set duty cycle (0 = OFF, 255 = FULL POWER)
 }
 
 
@@ -652,6 +713,9 @@ void laserEngrave(int Xdistance, int Ydistance)
 	// Starts the motor timers
 	  HAL_TIM_Base_Start_IT(&htim16);
 	  HAL_TIM_Base_Start_IT(&htim17);
+
+      // this is where I will start the pwm
+	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // start PWM on Timer2’s Channel 1
 
 	  while(((Xcurrent == Xend) && (Ycurrent == Yend)) == 0){}	// Waits for the motors to be done before proceeding
 }

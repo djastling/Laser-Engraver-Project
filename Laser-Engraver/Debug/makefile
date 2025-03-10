@@ -64,8 +64,8 @@ all: main-build
 main-build: Laser-Engraver.elf secondary-outputs
 
 # Tool invocations
-Laser-Engraver.elf Laser-Engraver.map: $(OBJS) $(USER_OBJS) C:\Users\djast\Documents\GitHub\Laser-Engraver-Project\Laser-Engraver\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Laser-Engraver.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\djast\Documents\GitHub\Laser-Engraver-Project\Laser-Engraver\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Laser-Engraver.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Laser-Engraver.elf Laser-Engraver.map: $(OBJS) $(USER_OBJS) C:\Users\lidya\Desktop\Laser-Engraver-Project\Laser-Engraver\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Laser-Engraver.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\lidya\Desktop\Laser-Engraver-Project\Laser-Engraver\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Laser-Engraver.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
