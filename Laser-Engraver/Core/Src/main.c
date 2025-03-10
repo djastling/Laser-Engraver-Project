@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
-// Heyyy
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,6 +47,7 @@
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
@@ -73,6 +73,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
 void GcommandExecute(char[], char[], char[], char[], char[], char[]);
@@ -136,6 +137,7 @@ int main(void)
   MX_TIM17_Init();
   MX_SPI1_Init();
   MX_FATFS_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
   	  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
@@ -164,7 +166,7 @@ int main(void)
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
 
-  InitiateMotors();
+//  InitiateMotors();
 
   /* USER CODE END 2 */
 
@@ -263,7 +265,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -277,6 +279,44 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 40000;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 65535;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
 
 }
 
@@ -387,8 +427,8 @@ static void MX_USART2_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -451,14 +491,14 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 10, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -477,26 +517,28 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 	if (GPIO_Pin == shutdownButton_Pin)
 	{
-		if (setup == 1)
-		{
-			HAL_TIM_Base_Stop_IT(&htim16);
-			HAL_TIM_Base_Stop_IT(&htim17);
+//		if (setup == 1)
+//		{
+//			HAL_TIM_Base_Stop_IT(&htim16);
+//			HAL_TIM_Base_Stop_IT(&htim17);
+//
+//			feed = 5000;
+//
+//			LaserEngrave(100, 100);
+//			Xcurrent = 0;
+//			Ycurrent = 0;
+//			setup = 0;
+//		}
+//		else
+//		{
+		HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
+		HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 
-			feed = 5000;
-			LaserEngrave(50, 50);
-			Xcurrent = 0;
-			Ycurrent = 0;
-		}
-		else
-		{
-			HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
-			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
+		HAL_TIM_Base_Stop_IT(&htim16);
+		HAL_TIM_Base_Stop_IT(&htim17);
 
-			HAL_TIM_Base_Stop_IT(&htim16);
-			HAL_TIM_Base_Stop_IT(&htim17);
-
-			while(1){}
-		}
+		while(1){}
+//		}
 	}
 }
 
@@ -759,7 +801,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 	}
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM3) {
+  if (htim->Instance == TIM3)
+  {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
