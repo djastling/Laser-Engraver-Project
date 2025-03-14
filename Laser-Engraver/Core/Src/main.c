@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -47,12 +48,37 @@
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart2;
 
+/* Definitions for LaserEngrave */
+osThreadId_t LaserEngraveHandle;
+const osThreadAttr_t LaserEngrave_attributes = {
+  .name = "LaserEngrave",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for LoadInstruction */
+osThreadId_t LoadInstructionHandle;
+const osThreadAttr_t LoadInstruction_attributes = {
+  .name = "LoadInstruction",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
+/* Definitions for valuesQueue */
+osMessageQueueId_t valuesQueueHandle;
+const osMessageQueueAttr_t valuesQueue_attributes = {
+  .name = "valuesQueue"
+};
+/* Definitions for running */
+osSemaphoreId_t runningHandle;
+const osSemaphoreAttr_t running_attributes = {
+  .name = "running"
+};
 /* USER CODE BEGIN PV */
 void myprintf(const char *fmt, ...);
 int Xcurrent = 0; // current X coordinate of laser (units of .1mm)
@@ -62,8 +88,25 @@ int YDIR = 1;	// Y motor Direction (1 is increasing Y coordinate, 0 is decreasin
 int Xend = 0; // End coordinate for the X motor (units of .1mm)
 int Yend = 0; // End coordinate for the Y motor (units of .1mm)
 int feed = 0;
-int laserSpeed = 0;
+int laser = 0;
 int setup = 1;
+int XCurrentCalculate = 0;
+int YCurrentCalculate = 0;
+
+typedef struct {
+	int Xend;
+	int Yend;
+	int Xspeed;
+	int Yspeed;
+	int laserSpeed;
+} Executable;
+
+FRESULT fres; //Result after operations
+
+//some variables for FatFs
+FATFS FatFs; 	//Fatfs handle
+FIL fil; 		//File handle
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -73,22 +116,27 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
+void LaserEngraveTask(void *argument);
+void StartLoadInstruction(void *argument);
+
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
-void GcommandExecute(char[], char[], char[], char[], char[], char[]);
-void McommandExecute(char[]);
-void GcommandParse(TCHAR* buff);
+Executable ComputeExecutables(char[], char[], char[], char[], char[], char[]);
+Executable GCommandParse(TCHAR* buff);
 void addChar(char*,char);
-void LaserEngrave(int, int);
+void LaserEngrave(Executable);
 void InitiateMotors();
+void SetOutputs(Executable);
+void StartEngrave(Executable);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void myprintf(const char *fmt, ...)
+void myprintf(const char *fmt, ...)	// Function to print over UART nicely
 {
 	static char buffer[256];
 	va_list args;
@@ -137,55 +185,83 @@ int main(void)
   MX_TIM17_Init();
   MX_SPI1_Init();
   MX_FATFS_Init();
+  MX_TIM2_Init();
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
-  	  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
-      HAL_Delay(1000); //a short delay is important to let the SD card settle
 
-      //some variables for FatFs
-      FATFS FatFs; 	//Fatfs handle
-      FIL fil; 		//File handle
-      FRESULT fres; //Result after operations
+  /* USER CODE END 2 */
 
-      //Open the file system
-      fres = f_mount(&FatFs, "", 1); //1=mount now
-      if (fres != FR_OK) {
-    	myprintf("f_mount error (%i)\r\n", fres);
-    	while(1);
-      }
+  /* Init scheduler */
+  osKernelInitialize();
 
-      fres = f_open(&fil, "test.txt", FA_READ);
+  /* USER CODE BEGIN RTOS_MUTEX */
+
+  //Open the file system
+  fres = f_mount(&FatFs, "", 1); //1=mount now
+  if (fres != FR_OK) {
+	myprintf("f_mount error (%i)\r\n", fres);
+	while(1);
+  }
+
+  fres = f_open(&fil, "test.txt", FA_READ);
 	  if (fres != FR_OK) {
 		myprintf("f_open error (%i)\r\n", fres);
 		while(1);
 	  }
-	  myprintf("I was able to open 'gtest.txt' for reading!\r\n");
 
+  HAL_Delay(100);	// Delay to allow the SD card to settle
 
-  HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
-  HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
+  HAL_TIM_Base_Start_IT(&htim2);	// Starts the timer for PWM
 
-//  InitiateMotors();
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
 
-  /* USER CODE END 2 */
+  /* Create the semaphores(s) */
+  /* creation of running */
+  runningHandle = osSemaphoreNew(1, 1, &running_attributes);
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* creation of valuesQueue */
+  valuesQueueHandle = osMessageQueueNew (100, 20, &valuesQueue_attributes);
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of LaserEngrave */
+  LaserEngraveHandle = osThreadNew(LaserEngraveTask, NULL, &LaserEngrave_attributes);
+
+  /* creation of LoadInstruction */
+  LoadInstructionHandle = osThreadNew(StartLoadInstruction, NULL, &LoadInstruction_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (HAL_GPIO_ReadPin(SPI1_CD_GPIO_Port, SPI1_CD_Pin))
-	  {
-		  BYTE readBuf[100];
-		  TCHAR* rres = f_gets((TCHAR*)readBuf, 100, &fil);
-		  if(rres != 0) {
-			  GcommandParse((TCHAR*)readBuf);
-		  } else {
-			f_close(&fil);
-			f_mount(NULL, "", 0);
-			while(1){}
-		  }
-	  }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -283,6 +359,65 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 79999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
   * @brief TIM7 Initialization Function
   * @param None
   * @retval None
@@ -300,7 +435,7 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 40000;
+  htim7.Init.Prescaler = 7;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim7.Init.Period = 65535;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -491,10 +626,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -503,8 +638,13 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// function call to find 0 0 and align the motors to the correct starting position
 void InitiateMotors()
 {
+
+	// we need to finish this code
+
+
 	__HAL_TIM_SET_PRESCALER(&htim16, 100);
 	__HAL_TIM_SET_PRESCALER(&htim17, 100);
 
@@ -513,36 +653,31 @@ void InitiateMotors()
 	  HAL_TIM_Base_Start_IT(&htim17);
 }
 
+// Interrupt Handler
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
+	// code for the shutdown buttons which trigger if the motors run out of bounds
 	if (GPIO_Pin == shutdownButton_Pin)
 	{
-//		if (setup == 1)
-//		{
-//			HAL_TIM_Base_Stop_IT(&htim16);
-//			HAL_TIM_Base_Stop_IT(&htim17);
-//
-//			feed = 5000;
-//
-//			LaserEngrave(100, 100);
-//			Xcurrent = 0;
-//			Ycurrent = 0;
-//			setup = 0;
-//		}
-//		else
-//		{
+
+		// writes a 1 to the enable pins to disable the motors
 		HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
 		HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 
+		// Turns off the motor timers so they don't send a signal anymore
 		HAL_TIM_Base_Stop_IT(&htim16);
 		HAL_TIM_Base_Stop_IT(&htim17);
 
+		// Turns of the laser's PWM
+		HAL_TIM_PWM_Stop(&htim7, TIM_CHANNEL_1);
+		HAL_TIM_Base_Stop_IT(&htim7);
+
+		// Puts the code in a while loop so the program has to be reset if it enters this state
 		while(1){}
-//		}
 	}
 }
 
-void GcommandParse(TCHAR* line1)
+Executable GCommandParse(TCHAR* line1)
 {
 
 	  // Creates local variables for the different possible commands in Gcode (max 10 characters)
@@ -553,6 +688,9 @@ void GcommandParse(TCHAR* line1)
 	  char feedRate[10] = "";
 	  char laserSpeed[10] = "";
 
+	  // New struct to save the values of the executables which are calculated in these functions
+	  Executable newExecutable;
+
 	  int i = 0;
 	  // Initiates a for loop which loops each character of the Gcode line
 	  while (1)
@@ -562,17 +700,20 @@ void GcommandParse(TCHAR* line1)
 		  char command = line1[i];	// assigns the first value of the Gcode as the command
 		  char newValue[10] = "";
 
-		  int j = 0;
-		  i++;
+		  // Temporary, incrementing variables
+		  int j = 0;	// represents the current charcter in the word
+		  i++;		// indicates the total character in the line
 
-		  while ((line1[i] != ' ') && (line1[i] != '\0') && (line1[i] != '\n'))	// while loop that loops through the rest of the command and stores the value in newValue
+		  // while loop that loops through the rest of the command and stores the value in newValue
+		  while ((line1[i] != ' ') && (line1[i] != '\0') && (line1[i] != '\n'))
 		  {
-
 			  newValue[j] = line1[i];
 			  i++;
 			  j++;
 		  }
-		  newValue[j] = '\0';	//adds the null operator to the end of the newValue
+
+		  //adds the null operator to the end of the newValue
+		  newValue[j] = '\0';
 
 		  // Switch statement for the value of command to split the current word into it's variable
 		  switch (command)
@@ -603,17 +744,20 @@ void GcommandParse(TCHAR* line1)
 		  default:
 				break;
 		  }
+
+		  // When the new line operator occurs, this means the line is over, so we break the while loop
 		  if (line1[i] == '\n')
 			  break;
+
+		  // increments i to the value of the first character of the next command
 		  i++;
 	  }
-	  if (strcmp(Gcommand,"G")){
-		  GcommandExecute(Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);	// Calls the Gcommand Execute function which will execute the given command
-		  myprintf("Gcommand: %s Xcoordinate: %s Ycoordinate: %s Zcoordinate: %s feedRate: %s laserSpeed %s\n", Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);
-	  }
-	  else if (strcmp(Gcommand,"M")){
-		  McommandExecute(Gcommand);
-	  }
+
+	  // Calls the Compute Executables command which computes the output Executables
+	  newExecutable = ComputeExecutables(Gcommand, Xcoordinate, Ycoordinate, Zcoordinate, feedRate, laserSpeed);
+
+	  // Returns the values in the Executable struct
+	  return newExecutable;
 }
 
 // function which adds a char to the end of a char array
@@ -627,103 +771,151 @@ void addChar(char *s, char c)
 }
 
 // Command Execute takes the parameters from the Gcode line and controls the motors accordingly
-void GcommandExecute(char Gcommand[], char Xcommand[], char Ycommand[], char Zcommand[], char feedRate[], char laserSpeed[])
+Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[], char Zcommand[], char feedRate[], char laserSpeed[])
 {
 
-	if ((!strcmp(Gcommand,"0")) || (!strcmp(Gcommand,"1")))	// If the Gcode command is G0, runs with rapid positioning (full speed move)
+	// creates a temporary Executable struct to save the values we compute
+	Executable newExecutable;
+
+	// If the Gcode command is G0, runs with rapid positioning (full speed move)
+	if ((!strcmp(Gcommand,"0")) || (!strcmp(Gcommand,"1")))
 	{
+
+		// If there is a value in Xcommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Xcommand[0] != '\0')
 		{
-			Xend = ((1600 / 43.39) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
-		} else
-		{
-			Xend = Xcurrent;
+			newExecutable.Xend = ((1600 / 43.39) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
 		}
+
+		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
+		else
+		{
+			newExecutable.Xend = XCurrentCalculate;
+		}
+
+		// If there is a value in Ycommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Ycommand[0] != '\0')
 		{
-			Yend = ((1600 / 43.39) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
-		} else
-		{
-			Yend = Ycurrent;
+			newExecutable.Yend = ((1600 / 43.39) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
 		}
 
-		// Calculates distance to be traveled
-		float Xdistance = Xend - Xcurrent;
-		float Ydistance = Yend - Ycurrent;
-
-		// Updates the Direction variable and writes to the pin
-		if (Xdistance > 0)
+		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
+		else
 		{
-			XDIR = 1;
-			HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
-		} else if (Xdistance < 0)
-		{
-			XDIR = 0;
-			HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+			newExecutable.Yend = YCurrentCalculate;
 		}
 
-		if (Ydistance > 0)
-		{
-			YDIR = 1;
-			HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
-		} else if (Ydistance < 0)
-		{
-			YDIR = 0;
-			HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
-		}
+		// Calculates distance to be traveled in the current engrave
+		float Xdistance = newExecutable.Xend - XCurrentCalculate;
+		float Ydistance = newExecutable.Yend - YCurrentCalculate;
 
-		int laser = atoi(laserSpeed);	// Converts laserSpeed to an int
+		// sets the current calculate global variable for the next line to use
+		XCurrentCalculate = newExecutable.Xend;
+		YCurrentCalculate = newExecutable.Yend;
 
+		// sets the feedRate variable (sometimes the Gcommand doesn't put in a new feedRate variable and the feedRate stays the same
+		// In order to calculate each step, we need to save the feedRate because the next command may need it
 		if (feedRate[0] != '\0')
 		{
 			feed = atoi(feedRate);	// Converts feedRate to an int
 		}
 
-		LaserEngrave(Xdistance, Ydistance);	// Calls the laserEngrave function
+		// Initiates the Xspeed and Yspeed variables to 1 (so if the speed doesn't change, the next instruction won't divide by 0)
+		// It is set to one so that the timer interrupt will be called quickly, and the stopped motor won't disrupt the other motor)
+		newExecutable.Xspeed = 1;
+		newExecutable.Yspeed = 1;
+
+		// calculates the total distance in order to evaluate the speed (feedRate is given in a direct, diagonal path)
+		float totalDistance = sqrt((Xdistance * Xdistance) + (Ydistance * Ydistance));
+
+		// ensures the distance won't be divided by 0
+		if (Xdistance != 0)
+		{
+
+			// Calcualtes the required prescaler value and saves it in the Xspeed variable
+			newExecutable.Xspeed = 162712.482 / ((abs(Xdistance) / totalDistance) * feed);
+		}
+
+		// Ensures the distance won't be divided by 0
+		if (Ydistance != 0)
+		{
+
+			// Calculates the required prescaler value and saves it in the Yspeed variable
+			newExecutable.Yspeed = 162712.482 / ((abs(Ydistance) / totalDistance) * feed);
+		}
+
+		// Converters laserSpeed to an int
+		newExecutable.laserSpeed = atoi(laserSpeed);
 
 	}
 
-	// We'll need to add all of the G commands here
+	// if there are any other possible input comands (M command, G02, G03, etc. we can put them here)
+
+	// returns the Executable struct
+	return newExecutable;
+
+
 
 }
 
-void McommandExecute(char Mcommand[])
-{
-	if ((Mcommand[1] == '5') && Mcommand[2] == '\0')
-	{
-		// Add code that turns the laser off
-	}
-	if ((Mcommand[1] == '3') && ((Mcommand[2] == '\0') || (Mcommand[2] == ' ')))
-	{
-		// Add code to turn laser on and PWM of value specified
-	}
+// Function to set the laser power. input must be a value from 0 to 255
+void SetLaserPower(uint8_t power) {
+
+	// the timer requires the duty cycle in a ratio from 0 to 80000
+	float dutyCycle = (power/255.0) * 80000;
+    TIM2->CCR1 = dutyCycle;  // Set duty cycle
 }
 
+// Function to start the motors and laser for engraving
+void StartEngrave(Executable output){
 
-void LaserEngrave(int Xdistance, int Ydistance)
-{
-	int Xspeed = 65535;
-	int Yspeed = 65535;
+	  // Starts the PWM for the laser
+	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+	  HAL_TIM_Base_Start_IT(&htim2);
 
-	float totalDistance = sqrt((Xdistance * Xdistance) + (Ydistance * Ydistance));
-	if (Xdistance != 0)
-	{
-		Xspeed = 162712.482 / ((abs(Xdistance) / totalDistance) * feed);
-	}
-	if (Ydistance != 0)
-	{
-		Yspeed = 162712.482 / ((abs(Ydistance) / totalDistance) * feed);
-	}
-
-	__HAL_TIM_SET_PRESCALER(&htim16, Xspeed);
-	__HAL_TIM_SET_PRESCALER(&htim17, Yspeed);
-
-	// Starts the motor timers
+	  // Starts the timers for the motors
 	  HAL_TIM_Base_Start_IT(&htim16);
 	  HAL_TIM_Base_Start_IT(&htim17);
-	  // Here is where the PWM starts
 
-	  while(((Xcurrent == Xend) && (Ycurrent == Yend)) == 0){}	// Waits for the motors to be done before proceeding
+}
+
+// Function which sets all the parameters in order to engrave
+void SetOutputs(Executable output){
+
+	// Sets the Xend and Yend global variables so the motors know when to stop
+	Xend = output.Xend;
+	Yend = output.Yend;
+
+	// Updates the X Direction variable and writes to the pin
+	if (output.Xend > Xcurrent)
+	{
+		XDIR = 1;
+		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
+	}
+	else if (output.Xend < Xcurrent)
+	{
+		XDIR = 0;
+		HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+	}
+
+	// Updates the X Direction variable and writes to the pin
+	if (output.Yend > Ycurrent)
+	{
+		YDIR = 1;
+		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
+	}
+	else if (output.Yend < Ycurrent)
+	{
+		YDIR = 0;
+		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
+	}
+
+	// Sets the prescaler values so the motors turn at the correct speed
+	__HAL_TIM_SET_PRESCALER(&htim16, output.Xspeed);
+	__HAL_TIM_SET_PRESCALER(&htim17, output.Yspeed);
+
+	// Sets the Laser Power to the correct value
+	SetLaserPower(output.laserSpeed);
 }
 
 PUTCHAR_PROTOTYPE
@@ -734,9 +926,92 @@ PUTCHAR_PROTOTYPE
 
 /* USER CODE END 4 */
 
+/* USER CODE BEGIN Header_LaserEngraveTask */
+/**
+This is the Laser Engrave task which controls the engraving output of the system
+This task has the highest priority of the tasks, since it is time constrained by the system, ie. if this tasks is blocked during execution, the motors might pause
+Before the task begins, it waits for a semaphore that the previous engrave command is done and a queue message from the loadInstructionTask with information on the next engrave.
+  */
+/* USER CODE END Header_LaserEngraveTask */
+void LaserEngraveTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+
+  // Ensures the enable pins are turned off to allow the motors to turn
+  HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
+  HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
+
+  // Declares the executable outside the for loop so that it doesn't have to be redeclared every time
+  Executable newExecutable;
+
+  // gives the loadInstruction Task a chance to load data from the SD card to fill the queue
+  osDelay(100);
+
+  /* Infinite loop */
+  for(;;)
+  {
+	  	  // This is where the program waits for the engrave to finish. The semaphore is initiated as fulfilled so it begins correctly.
+		  osSemaphoreAcquire(runningHandle, osWaitForever);
+
+		  // Gets the executable struct from the queue with the next engrave
+		  osMessageQueueGet(valuesQueueHandle, (Executable *) &newExecutable, 0, osWaitForever);
+
+		  // Sets the outputs such as the DIR outputs, the motor speeds and the laser PWM duty cycle
+		  SetOutputs(newExecutable);
+
+		  // Begins the timers for the engrave
+		  StartEngrave(newExecutable);
+  }
+
+
+  osThreadTerminate(NULL); // In case we accidentally exit from task loop
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartLoadInstruction */
+/**
+This is the LoadInstruction Task whose main purpose is to load information from the SD card, translate it into executable data, and add it to the queue
+This task has a lower priority than the laser engrave task, since we can load information in the background while the motors are running rather than during the laser engrave task
+*/
+/* USER CODE END Header_StartLoadInstruction */
+void StartLoadInstruction(void *argument)
+{
+  /* USER CODE BEGIN StartLoadInstruction */
+  /* Infinite loop */
+
+	// Declares variables outside of the loop so we don't have to reallocate memory for them each iteration of the for loop
+	BYTE readBuf[100];	// char array to store data from SD card
+	TCHAR* rres;	// return variable determining if the SD card is out of data
+	Executable newExecutable;	// int array with variables for us to execute
+
+
+  for(;;)
+  {
+	  // reads a line from the SD card and saves it in readBuf
+	  rres = f_gets((TCHAR*)readBuf, 100, &fil);
+
+	  // if there is data sent, it calls the GcommandParse function which computes the values we need to save in the executable struct
+	  if(rres != 0) {
+		newExecutable = GCommandParse((TCHAR*)readBuf);
+
+	  // if f_get returns 0, the program ends and enters a while loop
+	  } else {
+		f_close(&fil);	// closes the SD card file
+		f_mount(NULL, "", 0);	// un mounts the SD card
+		while(1){}		// loops forever because the program has ended
+	  }
+
+	  // Once we have the executable struct, we save the address to the Queue
+	  osMessageQueuePut(valuesQueueHandle, &newExecutable, 0, osWaitForever);
+  }
+
+  osThreadTerminate(NULL); // In case we accidentally exit from task loop
+  /* USER CODE END StartLoadInstruction */
+}
+
 /**
   * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM3 interrupt took place, inside
+  * @note   This function is called  when TIM6 interrupt took place, inside
   * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
   * a global variable "uwTick" used as application time base.
   * @param  htim : TIM handle
@@ -771,6 +1046,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else
 		{
 			HAL_TIM_Base_Stop_IT(&htim16);	// Once the X motor arrives to it's final position, this stops the timer
+
+			// if the X motor and Y motor have both arrived at their destinations
+			if ((Ycurrent == Yend))
+			{
+
+				// stops the laser PWM
+				HAL_TIM_Base_Stop_IT(&htim2);
+				HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+
+				// Gives the semaphore so the program can continue
+				if (osSemaphoreGetCount(runningHandle) == 0)
+					osSemaphoreRelease(runningHandle);
+			}
 		}
 	}
 
@@ -798,10 +1086,21 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		else
 		{
 		  HAL_TIM_Base_Stop_IT(&htim17);	// Once the Y motor arrives to it's final position, this stops the timer
+
+		  // if the X motor and Y motor have both arrived at their destinations
+		  if (Xcurrent == Xend)
+		  {
+			  // stops the laser PWM
+			  HAL_TIM_Base_Stop_IT(&htim2);
+			  HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+				// Gives the semaphore so the program can continue
+			  if (osSemaphoreGetCount(runningHandle) == 0)
+				  osSemaphoreRelease(runningHandle);
+		  }
 		}
 	}
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM3)
+  if (htim->Instance == TIM6)
   {
     HAL_IncTick();
   }
