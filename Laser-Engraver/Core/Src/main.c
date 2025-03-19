@@ -79,6 +79,11 @@ osSemaphoreId_t runningHandle;
 const osSemaphoreAttr_t running_attributes = {
   .name = "running"
 };
+/* Definitions for setup */
+osSemaphoreId_t setupHandle;
+const osSemaphoreAttr_t setup_attributes = {
+  .name = "setup"
+};
 /* USER CODE BEGIN PV */
 void myprintf(const char *fmt, ...);
 int Xcurrent = 0; // current X coordinate of laser (units of .1mm)
@@ -89,7 +94,7 @@ int Xend = 0; // End coordinate for the X motor (units of .1mm)
 int Yend = 0; // End coordinate for the Y motor (units of .1mm)
 int feed = 0;
 int laser = 0;
-int setup = 1;
+int setup = 2;
 int XCurrentCalculate = 0;
 int YCurrentCalculate = 0;
 
@@ -210,8 +215,6 @@ int main(void)
 		while(1);
 	  }
 
-  HAL_Delay(100);	// Delay to allow the SD card to settle
-
   HAL_TIM_Base_Start_IT(&htim2);	// Starts the timer for PWM
 
   /* add mutexes, ... */
@@ -219,7 +222,10 @@ int main(void)
 
   /* Create the semaphores(s) */
   /* creation of running */
-  runningHandle = osSemaphoreNew(1, 1, &running_attributes);
+  runningHandle = osSemaphoreNew(1, 0, &running_attributes);
+
+  /* creation of setup */
+  setupHandle = osSemaphoreNew(2, 0, &setup_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -595,7 +601,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : shutdownButton_Pin */
   GPIO_InitStruct.Pin = shutdownButton_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(shutdownButton_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : YPUL_Pin XDIR_Pin XEN_Pin */
@@ -642,15 +648,66 @@ static void MX_GPIO_Init(void)
 void InitiateMotors()
 {
 
-	// we need to finish this code
+	// setup variable which ensures the enable pins don't shut the system down during setup
+	setup = 2;
 
+	// writes a 0 to the enable pins to disable the motors
+	HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 0);
+	HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 0);
 
-	__HAL_TIM_SET_PRESCALER(&htim16, 100);
-	__HAL_TIM_SET_PRESCALER(&htim17, 100);
+	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
 
-	// Starts the motor timers
-	  HAL_TIM_Base_Start_IT(&htim16);
-	  HAL_TIM_Base_Start_IT(&htim17);
+	// Sets the Y end point, motor prescaler value and starts the motor
+	Yend = 99999999;
+	__HAL_TIM_SET_PRESCALER(&htim17, 200);
+	HAL_TIM_Base_Start_IT(&htim17);
+
+	// Waits for the out of bounds button to be hit
+	osSemaphoreAcquire(setupHandle, osWaitForever);
+	HAL_Delay(500);
+	setup--;
+	Xcurrent = 0;
+	Xend = 0;
+	Ycurrent = 0;
+	Yend = -3200;
+
+	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
+	YDIR = 0;
+	__HAL_TIM_SET_PRESCALER(&htim17, 50);
+	HAL_TIM_Base_Start_IT(&htim17);
+
+	osSemaphoreAcquire(runningHandle, osWaitForever);
+
+	HAL_Delay(500);
+
+	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
+
+	// Sets the X end point, motor prescaler value and starts the motor
+	Xend = 99999999;
+	__HAL_TIM_SET_PRESCALER(&htim16, 200);
+	HAL_TIM_Base_Start_IT(&htim16);
+
+	// Waits for the out of bounds button to be hit
+	osSemaphoreAcquire(setupHandle, osWaitForever);
+	HAL_Delay(500);
+	setup--;
+	Xcurrent = 0;
+	Xend = -3200;
+	Ycurrent = 0;
+	Yend = 0;
+
+	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+	XDIR = 0;
+	__HAL_TIM_SET_PRESCALER(&htim16, 50);
+	HAL_TIM_Base_Start_IT(&htim16);
+
+	osSemaphoreAcquire(runningHandle, osWaitForever);
+
+	HAL_Delay(500);
+
+	Xcurrent = 0;
+	Ycurrent = 0;
+
 }
 
 // Interrupt Handler
@@ -659,10 +716,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	// code for the shutdown buttons which trigger if the motors run out of bounds
 	if (GPIO_Pin == shutdownButton_Pin)
 	{
-
-		// writes a 1 to the enable pins to disable the motors
-		HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
-		HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 
 		// Turns off the motor timers so they don't send a signal anymore
 		HAL_TIM_Base_Stop_IT(&htim16);
@@ -673,7 +726,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		HAL_TIM_Base_Stop_IT(&htim7);
 
 		// Puts the code in a while loop so the program has to be reset if it enters this state
-		while(1){}
+		while(setup == 0){
+			// writes a 1 to the enable pins to disable the motors
+			HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
+			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
+		}
+		osSemaphoreRelease(setupHandle);
 	}
 }
 
@@ -936,7 +994,10 @@ Before the task begins, it waits for a semaphore that the previous engrave comma
 void LaserEngraveTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
+	InitiateMotors();
 
+	while (setup != 0)
+	{}
   // Ensures the enable pins are turned off to allow the motors to turn
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
@@ -946,6 +1007,8 @@ void LaserEngraveTask(void *argument)
 
   // gives the loadInstruction Task a chance to load data from the SD card to fill the queue
   osDelay(100);
+
+  osSemaphoreRelease(runningHandle);
 
   /* Infinite loop */
   for(;;)
@@ -978,12 +1041,13 @@ void StartLoadInstruction(void *argument)
 {
   /* USER CODE BEGIN StartLoadInstruction */
   /* Infinite loop */
+	while (setup != 0)
+	{}
 
 	// Declares variables outside of the loop so we don't have to reallocate memory for them each iteration of the for loop
 	BYTE readBuf[100];	// char array to store data from SD card
 	TCHAR* rres;	// return variable determining if the SD card is out of data
 	Executable newExecutable;	// int array with variables for us to execute
-
 
   for(;;)
   {
@@ -1061,6 +1125,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 		}
 	}
+
 
 	if (htim == &htim17)	// Y motor timer
 	{
