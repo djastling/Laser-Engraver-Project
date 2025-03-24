@@ -61,7 +61,6 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define B1_Pin GPIO_PIN_13
 #define B1_GPIO_Port GPIOC
-#define B1_EXTI_IRQn EXTI15_10_IRQn
 #define shutdownButton_Pin GPIO_PIN_1
 #define shutdownButton_GPIO_Port GPIOA
 #define shutdownButton_EXTI_IRQn EXTI1_IRQn

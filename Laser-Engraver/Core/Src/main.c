@@ -69,6 +69,13 @@ const osThreadAttr_t LoadInstruction_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for ControlTask */
+osThreadId_t ControlTaskHandle;
+const osThreadAttr_t ControlTask_attributes = {
+  .name = "ControlTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
 /* Definitions for valuesQueue */
 osMessageQueueId_t valuesQueueHandle;
 const osMessageQueueAttr_t valuesQueue_attributes = {
@@ -78,6 +85,16 @@ const osMessageQueueAttr_t valuesQueue_attributes = {
 osSemaphoreId_t runningHandle;
 const osSemaphoreAttr_t running_attributes = {
   .name = "running"
+};
+/* Definitions for taskControl */
+osSemaphoreId_t taskControlHandle;
+const osSemaphoreAttr_t taskControl_attributes = {
+  .name = "taskControl"
+};
+/* Definitions for Button1 */
+osSemaphoreId_t Button1Handle;
+const osSemaphoreAttr_t Button1_attributes = {
+  .name = "Button1"
 };
 /* Definitions for setup */
 osSemaphoreId_t setupHandle;
@@ -106,8 +123,6 @@ typedef struct {
 	int laserSpeed;
 } Executable;
 
-FRESULT fres; //Result after operations
-
 //some variables for FatFs
 FATFS FatFs; 	//Fatfs handle
 FIL fil; 		//File handle
@@ -125,6 +140,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
 void LaserEngraveTask(void *argument);
 void StartLoadInstruction(void *argument);
+void StartControlTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
@@ -153,6 +169,7 @@ void myprintf(const char *fmt, ...)	// Function to print over UART nicely
 	HAL_UART_Transmit(&huart2, (uint8_t*)buffer, len, -1);
 
 }
+
 
 /* USER CODE END 0 */
 
@@ -202,27 +219,18 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_MUTEX */
 
-  //Open the file system
-  fres = f_mount(&FatFs, "", 1); //1=mount now
-  if (fres != FR_OK) {
-	myprintf("f_mount error (%i)\r\n", fres);
-	while(1);
-  }
-
-  fres = f_open(&fil, "test.txt", FA_READ);
-	  if (fres != FR_OK) {
-		myprintf("f_open error (%i)\r\n", fres);
-		while(1);
-	  }
-
-  HAL_TIM_Base_Start_IT(&htim2);	// Starts the timer for PWM
-
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
   /* creation of running */
   runningHandle = osSemaphoreNew(1, 0, &running_attributes);
+
+  /* creation of taskControl */
+  taskControlHandle = osSemaphoreNew(1, 0, &taskControl_attributes);
+
+  /* creation of Button1 */
+  Button1Handle = osSemaphoreNew(1, 0, &Button1_attributes);
 
   /* creation of setup */
   setupHandle = osSemaphoreNew(2, 0, &setup_attributes);
@@ -249,6 +257,9 @@ int main(void)
 
   /* creation of LoadInstruction */
   LoadInstructionHandle = osThreadNew(StartLoadInstruction, NULL, &LoadInstruction_attributes);
+
+  /* creation of ControlTask */
+  ControlTaskHandle = osThreadNew(StartControlTask, NULL, &ControlTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -588,7 +599,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
@@ -629,9 +640,6 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* USER CODE END MX_GPIO_Init_2 */
 }
@@ -663,7 +671,7 @@ void InitiateMotors()
 	Xcurrent = 0;
 	Xend = 0;
 	Ycurrent = 0;
-	Yend = -3200;
+	Yend = -32000;
 
 	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
 	YDIR = 0;
@@ -671,7 +679,7 @@ void InitiateMotors()
 	HAL_TIM_Base_Start_IT(&htim17);
 
 	osSemaphoreAcquire(runningHandle, osWaitForever);
-
+	while(1){}
 	HAL_Delay(500);
 
 	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
@@ -726,6 +734,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 		}
 		osSemaphoreRelease(setupHandle);
+	}
+	if (GPIO_Pin == B1_Pin)
+	{
+		osSemaphoreRelease(Button1Handle);
 	}
 }
 
@@ -836,7 +848,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		// If there is a value in Xcommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Xcommand[0] != '\0')
 		{
-			newExecutable.Xend = ((1600 / 43.39) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
+			newExecutable.Xend = ((1600 / 40) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
 		}
 
 		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
@@ -848,7 +860,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		// If there is a value in Ycommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Ycommand[0] != '\0')
 		{
-			newExecutable.Yend = ((1600 / 43.39) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
+			newExecutable.Yend = ((1600 / 40) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
 		}
 
 		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
@@ -885,7 +897,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		{
 
 			// Calcualtes the required prescaler value and saves it in the Xspeed variable
-			newExecutable.Xspeed = 162712.482 / ((abs(Xdistance) / totalDistance) * feed);
+			newExecutable.Xspeed = 150000 / ((abs(Xdistance) / totalDistance) * feed);
 		}
 
 		// Ensures the distance won't be divided by 0
@@ -893,7 +905,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		{
 
 			// Calculates the required prescaler value and saves it in the Yspeed variable
-			newExecutable.Yspeed = 162712.482 / ((abs(Ydistance) / totalDistance) * feed);
+			newExecutable.Yspeed = 150000 / ((abs(Ydistance) / totalDistance) * feed);
 		}
 
 		// Converters laserSpeed to an int
@@ -988,10 +1000,11 @@ Before the task begins, it waits for a semaphore that the previous engrave comma
 void LaserEngraveTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	InitiateMotors();
 
 	while (setup != 0)
-	{}
+	{
+		osDelay(1);
+	}
   // Ensures the enable pins are turned off to allow the motors to turn
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
@@ -1036,7 +1049,9 @@ void StartLoadInstruction(void *argument)
   /* USER CODE BEGIN StartLoadInstruction */
   /* Infinite loop */
 	while (setup != 0)
-	{}
+	{
+		osDelay(1);
+	}
 
 	// Declares variables outside of the loop so we don't have to reallocate memory for them each iteration of the for loop
 	BYTE readBuf[100];	// char array to store data from SD card
@@ -1061,10 +1076,110 @@ void StartLoadInstruction(void *argument)
 
 	  // Once we have the executable struct, we save the address to the Queue
 	  osMessageQueuePut(valuesQueueHandle, &newExecutable, 0, osWaitForever);
+
   }
 
   osThreadTerminate(NULL); // In case we accidentally exit from task loop
   /* USER CODE END StartLoadInstruction */
+}
+
+/* USER CODE BEGIN Header_StartControlTask */
+/**
+* @brief Function implementing the ControlTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartControlTask */
+void StartControlTask(void *argument)
+{
+  /* USER CODE BEGIN StartControlTask */
+  /* Infinite loop */
+  for(;;)
+  {
+	  uint8_t RX_Buffer[50] = {0};
+
+	  myprintf("Welcome to the Laser Engraver!\n");
+	  HAL_Delay(1000);
+
+	  myprintf("What would you like to do?\n");
+	  HAL_Delay(200);
+
+	  myprintf("Set the motor to 0,0\n");
+
+	  myprintf("Open a file\n");
+
+	  myprintf("\n");
+	  //HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), -1);
+
+	  //HAL_UART_Receive(&huart2, (uint8_t*)buffer, strlen(buffer), 10);
+	  uint8_t receive_byte;
+	  uint8_t bytes_in =0;
+	  while ((receive_byte != '\r') && (receive_byte != '\n'))
+		{
+			while (HAL_UART_Receive(&huart2, &receive_byte, 1,10) != HAL_OK) osDelay(1);
+			/* Now we have a byte, if it's a carriage return, send the string
+			 * If not, put it on the buffer
+			 */
+			RX_Buffer[bytes_in] = receive_byte;
+			HAL_UART_Transmit(&huart2, &RX_Buffer[bytes_in++] , 1, HAL_MAX_DELAY);  //echo each one as it's typed
+		}
+
+	  if (RX_Buffer[0] == '0')
+	  {
+		  InitiateMotors();
+	  }
+	  else if (RX_Buffer[0] == '1')
+	  {
+		  char choiceDisplay[4];
+		  for (int i = 0; i <= 4; i++)
+		  {
+			  choiceDisplay[i] = '_';
+		  }
+		  int choice = 0;
+		  while(1)
+		  {
+			  myprintf("\n\n\n\n\n\n\n\n\n\n\n\n");
+			  myprintf("Files: \n");
+
+			  DIR dir;                    // Directory
+			  FILINFO fno;                // File Info
+			  FRESULT fres; //Result after operations
+
+			  fres = f_mount(&FatFs, "", 1); //1=mount now
+			  if (fres != FR_OK) {
+				myprintf("No SD card Detected\n");
+				while(1);
+			  }
+
+			  choiceDisplay[choice] = '*';
+
+			  int i = 0;
+			  f_opendir(&dir, "/");   // Open Root
+			  do
+			  {
+			      f_readdir(&dir, &fno);
+			      if(fno.fname[0] != 0)
+			      {
+			          myprintf("%s File found: %s\n", choiceDisplay[i], fno.fname); // Print File Name
+			          i++;
+			      }
+			  } while(fno.fname[0] != 0);
+
+			  f_closedir(&dir);
+
+			  fres = f_open(&fil, "BYUI.txt", FA_READ);
+			  if (fres != FR_OK) {
+				myprintf("Error: no file\n", fres);
+				while(1);
+			  }
+			  choiceDisplay[choice] = '_';
+			  osSemaphoreAcquire(Button1Handle, osWaitForever);
+			  choice++;
+		  }
+	  }
+	  osSemaphoreAcquire(taskControlHandle, osWaitForever);
+  }
+  /* USER CODE END StartControlTask */
 }
 
 /**
