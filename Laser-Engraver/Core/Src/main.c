@@ -133,9 +133,15 @@ static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM2_Init(void);
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 static void MX_TIM7_Init(void);
 void LaserEngraveTask(void *argument);
 void StartLoadInstruction(void *argument);
+=======
+static void MX_I2C1_Init(void);
+static void MX_I2C2_Init(void);
+
+>>>>>>> Stashed changes
 =======
 static void MX_I2C1_Init(void);
 static void MX_I2C2_Init(void);
@@ -209,6 +215,7 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM2_Init();
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
 
@@ -237,6 +244,34 @@ int main(void)
 =======
   MX_I2C1_Init();
   MX_I2C2_Init();
+=======
+  MX_I2C1_Init();
+  MX_I2C2_Init();
+
+  /* USER CODE BEGIN 2 */
+  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
+
+  HAL_Delay(1000); //a short delay is important to let the SD card settle
+
+  //some variables for FatFs
+  FATFS FatFs;    //Fatfs handle
+  FIL fil;         //File handle
+  FRESULT fres;    //Result after operations
+
+  //Open the file system
+  fres = f_mount(&FatFs, "", 1); //1=mount now
+  if (fres != FR_OK) {
+    myprintf("f_mount error (%i)\r\n", fres);
+    while(1);
+  }
+
+  fres = f_open(&fil, "test.txt", FA_READ);
+  if (fres != FR_OK) {
+    myprintf("f_open error (%i)\r\n", fres);
+    while(1);
+  }
+  myprintf("I was able to open 'test.txt' for reading!\r\n");
+>>>>>>> Stashed changes
 
   /* USER CODE BEGIN 2 */
   myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
@@ -319,6 +354,15 @@ int main(void)
       lcd_write_string ("HELLO");
       //HAL_Delay(1000);
 
+  // Display Strings
+
+      lcd_init ();
+      lcd_set_cursor(0, 0);
+      lcd_clear();
+      lcd_set_cursor(0, 0);
+      lcd_write_string ("HELLO");
+      //HAL_Delay(1000);
+
   /* USER CODE END 2 */
 >>>>>>> Stashed changes
 
@@ -326,6 +370,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
 
     /* USER CODE END WHILE */
@@ -354,6 +399,29 @@ int main(void)
       HAL_Delay(10);
     }
 
+=======
+    if (HAL_GPIO_ReadPin(SPI1_CD_GPIO_Port, SPI1_CD_Pin))
+    {
+      BYTE readBuf[100];
+      TCHAR* rres = f_gets((TCHAR*)readBuf, 100, &fil);
+      if(rres != 0) {
+        GcommandParse((TCHAR*)readBuf);
+      } else {
+        f_close(&fil);
+        f_mount(NULL, "", 0);
+        while(1){}
+      }
+    }
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+    // Gradually increase duty cycle
+    for (uint8_t power = 0; power <= 255; power += 5) {
+      SetLaserPower(power);
+      HAL_Delay(10);
+    }
+
+>>>>>>> Stashed changes
     // Gradually decrease duty cycle
     for (uint8_t power = 255; power > 0; power -= 5) {
       SetLaserPower(power);
@@ -364,6 +432,9 @@ int main(void)
 
 
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   /* USER CODE END 3 */
 }
@@ -1119,8 +1190,11 @@ void StartEngrave(Executable output){
 	  HAL_TIM_Base_Start_IT(&htim17);
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 }
 =======
+=======
+>>>>>>> Stashed changes
       //  start  pwm
 	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // start PWM on Timer2’s Channel 1
 >>>>>>> Stashed changes

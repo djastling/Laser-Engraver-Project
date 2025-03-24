@@ -83,12 +83,15 @@ void HAL_MspInit(void)
 
 /**
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   * @brief SPI MSP Initialization
   * This function configures the hardware resources used in this example
   * @param hspi: SPI handle pointer
   * @retval None
   */
 =======
+=======
+>>>>>>> Stashed changes
 * @brief I2C MSP Initialization
 * This function configures the hardware resources used in this example
 * @param hi2c: I2C handle pointer

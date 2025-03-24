@@ -1,5 +1,9 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 "./Core/Src/freertos.o"
+=======
+"./Core/Src/Inc/i2c-lcd.o"
+>>>>>>> Stashed changes
 =======
 "./Core/Src/Inc/i2c-lcd.o"
 >>>>>>> Stashed changes
