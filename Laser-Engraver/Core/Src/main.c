@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdarg.h>
+#include <i2c-lcd.h>
 
 
 /* USER CODE END Includes */
@@ -49,7 +50,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
-I2C_HandleTypeDef hi2c2;
 
 SPI_HandleTypeDef hspi1;
 
@@ -95,6 +95,11 @@ osSemaphoreId_t setupHandle;
 const osSemaphoreAttr_t setup_attributes = {
   .name = "setup"
 };
+/* Definitions for RunFile */
+osSemaphoreId_t RunFileHandle;
+const osSemaphoreAttr_t RunFile_attributes = {
+  .name = "RunFile"
+};
 /* USER CODE BEGIN PV */
 void myprintf(const char *fmt, ...);
 int Xcurrent = 0; // current X coordinate of laser (units of .1mm)
@@ -105,7 +110,7 @@ int Xend = 0; // End coordinate for the X motor (units of .1mm)
 int Yend = 0; // End coordinate for the Y motor (units of .1mm)
 int feed = 0;
 int laser = 0;
-int setup = 2;
+int setup = 0;
 int XCurrentCalculate = 0;
 int YCurrentCalculate = 0;
 
@@ -117,11 +122,11 @@ typedef struct {
 	int laserSpeed;
 } Executable;
 
-FRESULT fres; //Result after operations
-
 //some variables for FatFs
 FATFS FatFs; 	//Fatfs handle
 FIL fil; 		//File handle
+
+char RX_Buffer[50] = {0}; // Buffer for LCD screen
 
 /* USER CODE END PV */
 
@@ -134,7 +139,6 @@ static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_I2C2_Init(void);
 void StartLaserEngrave(void *argument);
 void StartLoadInstruction(void *argument);
 void StartControlTask(void *argument);
@@ -206,9 +210,10 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM2_Init();
   MX_I2C1_Init();
-  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
-
+  lcd_init();
+  lcd_clear();
+  lcd_backlight(1); // Turn on backlight
 
   /* USER CODE END 2 */
 
@@ -222,9 +227,6 @@ int main(void)
 
   HAL_TIM_Base_Start_IT(&htim2);	// Starts the timer for PWM
   MX_I2C1_Init();
-  MX_I2C2_Init();
-  MX_I2C1_Init();
-  MX_I2C2_Init();
 
   /* USER CODE BEGIN 2 */
 
@@ -244,6 +246,9 @@ int main(void)
 
   /* creation of setup */
   setupHandle = osSemaphoreNew(1, 0, &setup_attributes);
+
+  /* creation of RunFile */
+  RunFileHandle = osSemaphoreNew(1, 0, &RunFile_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -393,54 +398,6 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
-
-}
-
-/**
-  * @brief I2C2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C2_Init(void)
-{
-
-  /* USER CODE BEGIN I2C2_Init 0 */
-
-  /* USER CODE END I2C2_Init 0 */
-
-  /* USER CODE BEGIN I2C2_Init 1 */
-
-  /* USER CODE END I2C2_Init 1 */
-  hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x10D19CE4;
-  hi2c2.Init.OwnAddress1 = 0;
-  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c2.Init.OwnAddress2 = 0;
-  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c2, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C2_Init 2 */
-
-  /* USER CODE END I2C2_Init 2 */
 
 }
 
@@ -728,6 +685,7 @@ void InitiateMotors()
 	HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 0);
 
 	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
+	YDIR = 1;
 
 	// Sets the Y end point, motor prescaler value and starts the motor
 	Yend = 99999999;
@@ -752,28 +710,29 @@ void InitiateMotors()
 
 	HAL_Delay(500);
 
-	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
+	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
+	XDIR = 0;
 
 	// Sets the X end point, motor prescaler value and starts the motor
-	Xend = 99999999;
+	Xend = -99999999;
 	__HAL_TIM_SET_PRESCALER(&htim16, 200);
 	HAL_TIM_Base_Start_IT(&htim16);
 
 	// Waits for the out of bounds button to be hit
 	osSemaphoreAcquire(setupHandle, osWaitForever);
 	HAL_Delay(500);
-	setup--;
 	Xcurrent = 0;
-	Xend = -3200;
+	Xend = 3200;
 	Ycurrent = 0;
 	Yend = 0;
 
-	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 0);
-	XDIR = 0;
+	HAL_GPIO_WritePin(XDIR_GPIO_Port, XDIR_Pin, 1);
+	XDIR = 1;
 	__HAL_TIM_SET_PRESCALER(&htim16, 50);
 	HAL_TIM_Base_Start_IT(&htim16);
 
 	osSemaphoreAcquire(runningHandle, osWaitForever);
+	setup--;
 
 	HAL_Delay(500);
 
@@ -788,22 +747,33 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	// code for the shutdown buttons which trigger if the motors run out of bounds
 	if (GPIO_Pin == shutdownButton_Pin)
 	{
+		if (setup == 0)
+		{
+			// Turns of the laser's PWM
+			HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+			HAL_TIM_Base_Stop_IT(&htim2);
 
-		// Turns off the motor timers so they don't send a signal anymore
-		HAL_TIM_Base_Stop_IT(&htim16);
-		HAL_TIM_Base_Stop_IT(&htim17);
+			// Turns off the motor timers so they don't send a signal anymore
+			HAL_TIM_Base_Stop_IT(&htim16);
+			HAL_TIM_Base_Stop_IT(&htim17);
 
-		// Turns of the laser's PWM
-		HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
-		HAL_TIM_Base_Stop_IT(&htim2);
-
-		// Puts the code in a while loop so the program has to be reset if it enters this state
-		while(setup == 0){
-			// writes a 1 to the enable pins to disable the motors
+			// Turns enable output on
 			HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
 			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
 		}
-		osSemaphoreRelease(setupHandle);
+		else
+		{
+			if (XDIR == 0)
+			{
+				HAL_TIM_Base_Stop_IT(&htim16);
+
+			}
+			if (YDIR == 1)
+			{
+				HAL_TIM_Base_Stop_IT(&htim17);
+			}
+			osSemaphoreRelease(setupHandle);
+		}
 	}
 }
 
@@ -991,6 +961,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 // Function to set the laser power. input must be a value from 0 to 255
 void SetLaserPower(uint8_t power) {
 
+	power = power / 2;
 	// the timer requires the duty cycle in a ratio from 0 to 80000
 	float dutyCycle = (power/255.0) * 80000;
     TIM2->CCR1 = dutyCycle;  // Set duty cycle
@@ -1066,7 +1037,6 @@ PUTCHAR_PROTOTYPE
 void StartLaserEngrave(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	InitiateMotors();
 
 	while (setup != 0) osDelay(1);
   // Ensures the enable pins are turned off to allow the motors to turn
@@ -1131,8 +1101,7 @@ void StartLoadInstruction(void *argument)
 	  // if f_get returns 0, the program ends and enters a while loop
 	  } else {
 		f_close(&fil);	// closes the SD card file
-		f_mount(NULL, "", 0);	// un mounts the SD card
-		while(1){}		// loops forever because the program has ended
+		osSemaphoreRelease(RunFileHandle);	// Releases the semaphore to give control back to the ControlTask
 	  }
 
 	  // Once we have the executable struct, we save the address to the Queue
@@ -1156,9 +1125,19 @@ void StartControlTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+
+//	  SetLaserPower(50);
+//
+//	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+//	  HAL_TIM_Base_Start_IT(&htim2);
+
+	  //while(1);
+
 	  //some variables for FatFs
 	  FATFS FatFs;    //Fatfs handle
 	  FRESULT fres;    //Result after operations
+	  DIR dir;			//Directory
+	  FILINFO fno;		// File info
 
 	  //Open the file system
 	  fres = f_mount(&FatFs, "", 1); //1=mount now
@@ -1167,12 +1146,61 @@ void StartControlTask(void *argument)
 		while(1);
 	  }
 
-	  fres = f_open(&fil, "BYUI.txt", FA_READ);
-	  if (fres != FR_OK) {
+
+	  f_opendir(&dir, "/");   // Open Root
+
+	  int count = 0;
+	  do
+	  	  {
+	  	      f_readdir(&dir, &fno);
+	  	      if(fno.fname[0] != 0)
+	  	    	  count++;
+	  	  } while(fno.fname[0] != 0);
+
+	  f_closedir(&dir);
+	  f_opendir(&dir, "/");
+
+	  char fileNames[count][20];
+	  int i = 0;
+	  do
+	  {
+	      f_readdir(&dir, &fno);
+	      if(fno.fname[0] != 0)
+	      {
+	    	  strcpy(fileNames[i], fno.fname);
+	    	  i++;
+	      }
+	  } while(fno.fname[0] != 0);
+
+	  i = 0;
+//	  while(1)
+//	  {
+//		  lcd_clear();
+//		  lcd_set_cursor(0,0);
+//		  lcd_write_string("*");
+//		  lcd_write_string(fileNames[i]);
+//		  lcd_write_string("*");
+//		  lcd_set_cursor(1,0);
+//		  lcd_write_string(fileNames[i+1]);
+//		  HAL_Delay(300);
+//	  }
+
+
+
+
+	  fres = f_open(&fil, "sonic.txt", FA_READ);
+	  if (fres != FR_OK){
 		myprintf("f_open error (%i)\r\n", fres);
 		while(1);
 	  }
-	  osDelay(1);
+
+	  InitiateMotors();
+	  osSemaphoreAcquire(RunFileHandle, osWaitForever);
+
+	  lcd_clear();
+	  lcd_write_string(("Program Complete!"));
+	  HAL_Delay(5000);
+
   }
   /* USER CODE END StartControlTask */
 }
