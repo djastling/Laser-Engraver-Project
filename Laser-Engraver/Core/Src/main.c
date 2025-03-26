@@ -209,6 +209,24 @@ int main(void)
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
 
+  //some variables for FatFs
+  FATFS FatFs;    //Fatfs handle
+  FRESULT fres;    //Result after operations
+
+  //Open the file system
+  fres = f_mount(&FatFs, "", 1); //1=mount now
+  if (fres != FR_OK) {
+	myprintf("f_mount error (%i)\r\n", fres);
+	while(1);
+  }
+
+  fres = f_open(&fil, "BYUI.txt", FA_READ);
+  if (fres != FR_OK) {
+	myprintf("f_open error (%i)\r\n", fres);
+	while(1);
+  }
+
+  HAL_Delay(100);
 
   /* USER CODE END 2 */
 
@@ -1156,22 +1174,7 @@ void StartControlTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  //some variables for FatFs
-	  FATFS FatFs;    //Fatfs handle
-	  FRESULT fres;    //Result after operations
 
-	  //Open the file system
-	  fres = f_mount(&FatFs, "", 1); //1=mount now
-	  if (fres != FR_OK) {
-		myprintf("f_mount error (%i)\r\n", fres);
-		while(1);
-	  }
-
-	  fres = f_open(&fil, "BYUI.txt", FA_READ);
-	  if (fres != FR_OK) {
-		myprintf("f_open error (%i)\r\n", fres);
-		while(1);
-	  }
 	  osDelay(1);
   }
   /* USER CODE END StartControlTask */
