@@ -1,52 +1,25 @@
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-../Core/Src/main.c:144:6:myprintf	1
-../Core/Src/main.c:163:5:main	3
-../Core/Src/main.c:282:6:SystemClock_Config	4
-../Core/Src/main.c:332:13:MX_SPI1_Init	2
-../Core/Src/main.c:372:13:MX_TIM2_Init	6
-../Core/Src/main.c:431:13:MX_TIM7_Init	3
-../Core/Src/main.c:469:13:MX_TIM16_Init	2
-../Core/Src/main.c:501:13:MX_TIM17_Init	2
-../Core/Src/main.c:533:13:MX_USART2_UART_Init	2
-../Core/Src/main.c:568:13:MX_GPIO_Init	1
-../Core/Src/main.c:648:6:InitiateMotors	1
-../Core/Src/main.c:714:6:HAL_GPIO_EXTI_Callback	3
-../Core/Src/main.c:738:12:GCommandParse	12
-../Core/Src/main.c:822:6:addChar	2
-../Core/Src/main.c:832:12:ComputeExecutables	8
-../Core/Src/main.c:920:6:SetLaserPower	1
-../Core/Src/main.c:928:6:StartEngrave	1
-../Core/Src/main.c:941:6:SetOutputs	5
-../Core/Src/main.c:979:1:__io_putchar	1
-../Core/Src/main.c:994:6:LaserEngraveTask	2
-../Core/Src/main.c:1040:6:StartLoadInstruction	3
-../Core/Src/main.c:1084:6:HAL_TIM_PeriodElapsedCallback	14
-../Core/Src/main.c:1180:6:Error_Handler	1
-=======
-=======
->>>>>>> Stashed changes
-../Core/Src/main.c:104:6:myprintf	1
-../Core/Src/main.c:123:5:main	5
-../Core/Src/main.c:238:6:SystemClock_Config	4
-../Core/Src/main.c:288:13:MX_I2C1_Init	4
-../Core/Src/main.c:336:13:MX_I2C2_Init	4
-../Core/Src/main.c:384:13:MX_SPI1_Init	2
-../Core/Src/main.c:424:13:MX_TIM2_Init	4
-../Core/Src/main.c:473:13:MX_TIM16_Init	2
-../Core/Src/main.c:505:13:MX_TIM17_Init	2
-../Core/Src/main.c:537:13:MX_USART2_UART_Init	2
-../Core/Src/main.c:572:13:MX_GPIO_Init	1
-../Core/Src/main.c:641:6:HAL_GPIO_EXTI_Callback	2
-../Core/Src/main.c:656:6:GcommandParse	13
-../Core/Src/main.c:731:6:addChar	2
-../Core/Src/main.c:741:6:GcommandExecute	10
-../Core/Src/main.c:805:6:SetLaserPower	1
-../Core/Src/main.c:810:6:laserEngrave	6
-../Core/Src/main.c:838:1:__io_putchar	1
-../Core/Src/main.c:854:6:HAL_TIM_PeriodElapsedCallback	10
-../Core/Src/main.c:924:6:Error_Handler	1
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
+../Core/Src/main.c:158:6:myprintf	1
+../Core/Src/main.c:177:5:main	3
+../Core/Src/main.c:323:6:SystemClock_Config	4
+../Core/Src/main.c:373:13:MX_I2C1_Init	4
+../Core/Src/main.c:421:13:MX_I2C2_Init	4
+../Core/Src/main.c:469:13:MX_SPI1_Init	2
+../Core/Src/main.c:509:13:MX_TIM2_Init	4
+../Core/Src/main.c:558:13:MX_TIM16_Init	2
+../Core/Src/main.c:590:13:MX_TIM17_Init	2
+../Core/Src/main.c:622:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:657:13:MX_GPIO_Init	1
+../Core/Src/main.c:737:6:InitiateMotors	1
+../Core/Src/main.c:803:6:HAL_GPIO_EXTI_Callback	3
+../Core/Src/main.c:827:12:GCommandParse	12
+../Core/Src/main.c:911:6:addChar	2
+../Core/Src/main.c:921:12:ComputeExecutables	8
+../Core/Src/main.c:1009:6:SetLaserPower	1
+../Core/Src/main.c:1017:6:StartEngrave	1
+../Core/Src/main.c:1030:6:SetOutputs	5
+../Core/Src/main.c:1068:1:__io_putchar	1
+../Core/Src/main.c:1083:6:StartLaserEngrave	2
+../Core/Src/main.c:1128:6:StartLoadInstruction	3
+../Core/Src/main.c:1170:6:StartControlTask	1
+../Core/Src/main.c:1189:6:HAL_TIM_PeriodElapsedCallback	14
+../Core/Src/main.c:1285:6:Error_Handler	1

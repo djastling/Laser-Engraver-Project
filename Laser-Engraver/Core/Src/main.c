@@ -20,11 +20,6 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "fatfs.h"
-#include "stm32l4xx_hal.h"
-#include "string.h"
-#include "i2c-lcd.h"  // Or whatever header contains your LCD_Init and LCD_Print functions
-
-
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -59,7 +54,6 @@ I2C_HandleTypeDef hi2c2;
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
-TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim16;
 TIM_HandleTypeDef htim17;
 
@@ -77,12 +71,19 @@ osThreadId_t LoadInstructionHandle;
 const osThreadAttr_t LoadInstruction_attributes = {
   .name = "LoadInstruction",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for valuesQueue */
-osMessageQueueId_t valuesQueueHandle;
-const osMessageQueueAttr_t valuesQueue_attributes = {
-  .name = "valuesQueue"
+/* Definitions for ControlTask */
+osThreadId_t ControlTaskHandle;
+const osThreadAttr_t ControlTask_attributes = {
+  .name = "ControlTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityHigh,
+};
+/* Definitions for valueQueue */
+osMessageQueueId_t valueQueueHandle;
+const osMessageQueueAttr_t valueQueue_attributes = {
+  .name = "valueQueue"
 };
 /* Definitions for running */
 osSemaphoreId_t runningHandle;
@@ -132,21 +133,11 @@ static void MX_TIM16_Init(void);
 static void MX_TIM17_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM2_Init(void);
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-static void MX_TIM7_Init(void);
-void LaserEngraveTask(void *argument);
+static void MX_I2C1_Init(void);
+static void MX_I2C2_Init(void);
+void StartLaserEngrave(void *argument);
 void StartLoadInstruction(void *argument);
-=======
-static void MX_I2C1_Init(void);
-static void MX_I2C2_Init(void);
-
->>>>>>> Stashed changes
-=======
-static void MX_I2C1_Init(void);
-static void MX_I2C2_Init(void);
-
->>>>>>> Stashed changes
+void StartControlTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void MotorStraightLine();
@@ -214,9 +205,8 @@ int main(void)
   MX_SPI1_Init();
   MX_FATFS_Init();
   MX_TIM2_Init();
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-  MX_TIM7_Init();
+  MX_I2C1_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
 
 
@@ -228,75 +218,22 @@ int main(void)
   /* USER CODE BEGIN RTOS_MUTEX */
 
   //Open the file system
-  fres = f_mount(&FatFs, "", 1); //1=mount now
-  if (fres != FR_OK) {
-	myprintf("f_mount error (%i)\r\n", fres);
-	while(1);
-  }
 
-  fres = f_open(&fil, "test.txt", FA_READ);
-	  if (fres != FR_OK) {
-		myprintf("f_open error (%i)\r\n", fres);
-		while(1);
-	  }
 
   HAL_TIM_Base_Start_IT(&htim2);	// Starts the timer for PWM
-=======
   MX_I2C1_Init();
   MX_I2C2_Init();
-=======
   MX_I2C1_Init();
   MX_I2C2_Init();
 
   /* USER CODE BEGIN 2 */
-  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
   HAL_Delay(1000); //a short delay is important to let the SD card settle
 
-  //some variables for FatFs
-  FATFS FatFs;    //Fatfs handle
-  FIL fil;         //File handle
-  FRESULT fres;    //Result after operations
 
-  //Open the file system
-  fres = f_mount(&FatFs, "", 1); //1=mount now
-  if (fres != FR_OK) {
-    myprintf("f_mount error (%i)\r\n", fres);
-    while(1);
-  }
-
-  fres = f_open(&fil, "test.txt", FA_READ);
-  if (fres != FR_OK) {
-    myprintf("f_open error (%i)\r\n", fres);
-    while(1);
-  }
-  myprintf("I was able to open 'test.txt' for reading!\r\n");
->>>>>>> Stashed changes
 
   /* USER CODE BEGIN 2 */
-  myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
-  HAL_Delay(1000); //a short delay is important to let the SD card settle
-
-  //some variables for FatFs
-  FATFS FatFs;    //Fatfs handle
-  FIL fil;         //File handle
-  FRESULT fres;    //Result after operations
-
-  //Open the file system
-  fres = f_mount(&FatFs, "", 1); //1=mount now
-  if (fres != FR_OK) {
-    myprintf("f_mount error (%i)\r\n", fres);
-    while(1);
-  }
-
-  fres = f_open(&fil, "test.txt", FA_READ);
-  if (fres != FR_OK) {
-    myprintf("f_open error (%i)\r\n", fres);
-    while(1);
-  }
-  myprintf("I was able to open 'test.txt' for reading!\r\n");
->>>>>>> Stashed changes
 
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
@@ -305,9 +242,8 @@ int main(void)
   /* creation of running */
   runningHandle = osSemaphoreNew(1, 0, &running_attributes);
 
-<<<<<<< Updated upstream
   /* creation of setup */
-  setupHandle = osSemaphoreNew(2, 0, &setup_attributes);
+  setupHandle = osSemaphoreNew(1, 0, &setup_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -318,8 +254,8 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of valuesQueue */
-  valuesQueueHandle = osMessageQueueNew (100, 20, &valuesQueue_attributes);
+  /* creation of valueQueue */
+  valueQueueHandle = osMessageQueueNew (100, 20, &valueQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -327,10 +263,13 @@ int main(void)
 
   /* Create the thread(s) */
   /* creation of LaserEngrave */
-  LaserEngraveHandle = osThreadNew(LaserEngraveTask, NULL, &LaserEngrave_attributes);
+  LaserEngraveHandle = osThreadNew(StartLaserEngrave, NULL, &LaserEngrave_attributes);
 
   /* creation of LoadInstruction */
   LoadInstructionHandle = osThreadNew(StartLoadInstruction, NULL, &LoadInstruction_attributes);
+
+  /* creation of ControlTask */
+  ControlTaskHandle = osThreadNew(StartControlTask, NULL, &ControlTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -344,98 +283,19 @@ int main(void)
   osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
-=======
-  // Display Strings
-
-      lcd_init ();
-      lcd_set_cursor(0, 0);
-      lcd_clear();
-      lcd_set_cursor(0, 0);
-      lcd_write_string ("HELLO");
-      //HAL_Delay(1000);
-
-  // Display Strings
-
-      lcd_init ();
-      lcd_set_cursor(0, 0);
-      lcd_clear();
-      lcd_set_cursor(0, 0);
-      lcd_write_string ("HELLO");
-      //HAL_Delay(1000);
-
-  /* USER CODE END 2 */
->>>>>>> Stashed changes
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
-=======
-    if (HAL_GPIO_ReadPin(SPI1_CD_GPIO_Port, SPI1_CD_Pin))
-    {
-      BYTE readBuf[100];
-      TCHAR* rres = f_gets((TCHAR*)readBuf, 100, &fil);
-      if(rres != 0) {
-        GcommandParse((TCHAR*)readBuf);
-      } else {
-        f_close(&fil);
-        f_mount(NULL, "", 0);
-        while(1){}
-      }
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // Gradually increase duty cycle
-    for (uint8_t power = 0; power <= 255; power += 5) {
-      SetLaserPower(power);
-      HAL_Delay(10);
-    }
-
-=======
-    if (HAL_GPIO_ReadPin(SPI1_CD_GPIO_Port, SPI1_CD_Pin))
-    {
-      BYTE readBuf[100];
-      TCHAR* rres = f_gets((TCHAR*)readBuf, 100, &fil);
-      if(rres != 0) {
-        GcommandParse((TCHAR*)readBuf);
-      } else {
-        f_close(&fil);
-        f_mount(NULL, "", 0);
-        while(1){}
-      }
-    }
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-    // Gradually increase duty cycle
-    for (uint8_t power = 0; power <= 255; power += 5) {
-      SetLaserPower(power);
-      HAL_Delay(10);
-    }
-
->>>>>>> Stashed changes
-    // Gradually decrease duty cycle
-    for (uint8_t power = 255; power > 0; power -= 5) {
-      SetLaserPower(power);
-      HAL_Delay(10);
-    }
-  }
-
-
-
-
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
   /* USER CODE END 3 */
 }
 
@@ -636,7 +496,6 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
@@ -649,15 +508,6 @@ static void MX_TIM2_Init(void)
   htim2.Init.Period = 79999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
   if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
@@ -680,44 +530,6 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
-
-}
-
-/**
-  * @brief TIM7 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM7_Init(void)
-{
-
-  /* USER CODE BEGIN TIM7_Init 0 */
-
-  /* USER CODE END TIM7_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM7_Init 1 */
-
-  /* USER CODE END TIM7_Init 1 */
-  htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 7;
-  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 65535;
-  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM7_Init 2 */
-
-  /* USER CODE END TIM7_Init 2 */
 
 }
 
@@ -852,6 +664,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PC0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   /*Configure GPIO pin : shutdownButton_Pin */
   GPIO_InitStruct.Pin = shutdownButton_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
@@ -976,8 +794,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		HAL_TIM_Base_Stop_IT(&htim17);
 
 		// Turns of the laser's PWM
-		HAL_TIM_PWM_Stop(&htim7, TIM_CHANNEL_1);
-		HAL_TIM_Base_Stop_IT(&htim7);
+		HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+		HAL_TIM_Base_Stop_IT(&htim2);
 
 		// Puts the code in a while loop so the program has to be reset if it enters this state
 		while(setup == 0){
@@ -1189,15 +1007,7 @@ void StartEngrave(Executable output){
 	  HAL_TIM_Base_Start_IT(&htim16);
 	  HAL_TIM_Base_Start_IT(&htim17);
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 }
-=======
-=======
->>>>>>> Stashed changes
-      //  start  pwm
-	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // start PWM on Timer2’s Channel 1
->>>>>>> Stashed changes
 
 // Function which sets all the parameters in order to engrave
 void SetOutputs(Executable output){
@@ -1246,20 +1056,19 @@ PUTCHAR_PROTOTYPE
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_LaserEngraveTask */
+/* USER CODE BEGIN Header_StartLaserEngrave */
 /**
-This is the Laser Engrave task which controls the engraving output of the system
-This task has the highest priority of the tasks, since it is time constrained by the system, ie. if this tasks is blocked during execution, the motors might pause
-Before the task begins, it waits for a semaphore that the previous engrave command is done and a queue message from the loadInstructionTask with information on the next engrave.
+  * @brief  Function implementing the LaserEngrave thread.
+  * @param  argument: Not used
+  * @retval None
   */
-/* USER CODE END Header_LaserEngraveTask */
-void LaserEngraveTask(void *argument)
+/* USER CODE END Header_StartLaserEngrave */
+void StartLaserEngrave(void *argument)
 {
   /* USER CODE BEGIN 5 */
 	InitiateMotors();
 
-	while (setup != 0)
-	{}
+	while (setup != 0) osDelay(1);
   // Ensures the enable pins are turned off to allow the motors to turn
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
   HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
@@ -1279,7 +1088,7 @@ void LaserEngraveTask(void *argument)
 		  osSemaphoreAcquire(runningHandle, osWaitForever);
 
 		  // Gets the executable struct from the queue with the next engrave
-		  osMessageQueueGet(valuesQueueHandle, (Executable *) &newExecutable, 0, osWaitForever);
+		  osMessageQueueGet(valueQueueHandle, (Executable *) &newExecutable, 0, osWaitForever);
 
 		  // Sets the outputs such as the DIR outputs, the motor speeds and the laser PWM duty cycle
 		  SetOutputs(newExecutable);
@@ -1303,8 +1112,7 @@ void StartLoadInstruction(void *argument)
 {
   /* USER CODE BEGIN StartLoadInstruction */
   /* Infinite loop */
-	while (setup != 0)
-	{}
+	while (setup != 0) osDelay(1);
 
 	// Declares variables outside of the loop so we don't have to reallocate memory for them each iteration of the for loop
 	BYTE readBuf[100];	// char array to store data from SD card
@@ -1328,16 +1136,50 @@ void StartLoadInstruction(void *argument)
 	  }
 
 	  // Once we have the executable struct, we save the address to the Queue
-	  osMessageQueuePut(valuesQueueHandle, &newExecutable, 0, osWaitForever);
+	  osMessageQueuePut(valueQueueHandle, &newExecutable, 0, osWaitForever);
   }
 
   osThreadTerminate(NULL); // In case we accidentally exit from task loop
   /* USER CODE END StartLoadInstruction */
 }
 
+/* USER CODE BEGIN Header_StartControlTask */
+/**
+  * @brief  Function implementing the ControlTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartControlTask */
+void StartControlTask(void *argument)
+{
+  /* USER CODE BEGIN StartControlTask */
+  /* Infinite loop */
+  for(;;)
+  {
+	  //some variables for FatFs
+	  FATFS FatFs;    //Fatfs handle
+	  FRESULT fres;    //Result after operations
+
+	  //Open the file system
+	  fres = f_mount(&FatFs, "", 1); //1=mount now
+	  if (fres != FR_OK) {
+		myprintf("f_mount error (%i)\r\n", fres);
+		while(1);
+	  }
+
+	  fres = f_open(&fil, "BYUI.txt", FA_READ);
+	  if (fres != FR_OK) {
+		myprintf("f_open error (%i)\r\n", fres);
+		while(1);
+	  }
+	  osDelay(1);
+  }
+  /* USER CODE END StartControlTask */
+}
+
 /**
   * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM6 interrupt took place, inside
+  * @note   This function is called  when TIM3 interrupt took place, inside
   * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
   * a global variable "uwTick" used as application time base.
   * @param  htim : TIM handle
@@ -1349,24 +1191,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 	if (htim == &htim16)	// X motor timer
 	{
-
 		if (Xcurrent != Xend)	// Evaluates if the X motor has arrived in it's position
 		{
-
 			HAL_GPIO_TogglePin(XPUL_GPIO_Port, XPUL_Pin);	// Toggles the XPUL pin
 
 			// Increments the Xcurrent value if XDIR is positive and decrements if Xcurrent value is negative
 			// only increments every other cycle
 			if (!HAL_GPIO_ReadPin(XPUL_GPIO_Port, XPUL_Pin))
 			{
-				if (XDIR == 1)
-				{
-					Xcurrent++;
-				}
-				else
-				{
-					Xcurrent--;
-				}
+				if (XDIR == 1) Xcurrent++;
+
+				else Xcurrent--;
 			}
 		}
 		else
@@ -1400,14 +1235,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			// Increments the Ycurrent value if YDIR is positive and decrements if Ycurrent value is negative
 			if (!HAL_GPIO_ReadPin(YPUL_GPIO_Port, YPUL_Pin))
 			{
-				if (YDIR == 1)
-				{
-					Ycurrent++;
-				}
-				else
-				{
-					Ycurrent--;
-				}
+				if (YDIR == 1) Ycurrent++;
+
+				else Ycurrent--;
 			}
 		}
 		else
@@ -1427,7 +1257,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		}
 	}
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM6)
+  if (htim->Instance == TIM3)
   {
     HAL_IncTick();
   }
