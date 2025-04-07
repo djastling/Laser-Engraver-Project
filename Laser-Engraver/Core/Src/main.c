@@ -607,10 +607,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, YPUL_Pin|XDIR_Pin|XEN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, XPUL_Pin|YPUL2_Pin|YEN2_Pin|YDIR2_Pin
+                          |YDIR1_Pin|YEN1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, YEN_Pin|YDIR_Pin|XPUL_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, XEN_Pin|XDIR_Pin|YPUL1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
@@ -633,8 +634,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(shutdownButton_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : YPUL_Pin XDIR_Pin XEN_Pin */
-  GPIO_InitStruct.Pin = YPUL_Pin|XDIR_Pin|XEN_Pin;
+  /*Configure GPIO pins : XPUL_Pin YPUL2_Pin YEN2_Pin YDIR2_Pin
+                           YDIR1_Pin YEN1_Pin */
+  GPIO_InitStruct.Pin = XPUL_Pin|YPUL2_Pin|YEN2_Pin|YDIR2_Pin
+                          |YDIR1_Pin|YEN1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -646,8 +649,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(SPI1_CD_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : YEN_Pin YDIR_Pin XPUL_Pin */
-  GPIO_InitStruct.Pin = YEN_Pin|YDIR_Pin|XPUL_Pin;
+  /*Configure GPIO pins : XEN_Pin XDIR_Pin YPUL1_Pin */
+  GPIO_InitStruct.Pin = XEN_Pin|XDIR_Pin|YPUL1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -682,14 +685,16 @@ void InitiateMotors()
 
 	// writes a 0 to the enable pins to disable the motors
 	HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 0);
-	HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 0);
+	HAL_GPIO_WritePin(YEN1_GPIO_Port, YEN1_Pin, 0);
+	HAL_GPIO_WritePin(YEN2_GPIO_Port, YEN2_Pin, 0);
 
-	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
+	HAL_GPIO_WritePin(YDIR1_GPIO_Port, YDIR1_Pin, 1);
+	HAL_GPIO_WritePin(YDIR2_GPIO_Port, YDIR2_Pin, 1);
 	YDIR = 1;
 
 	// Sets the Y end point, motor prescaler value and starts the motor
 	Yend = 99999999;
-	__HAL_TIM_SET_PRESCALER(&htim17, 200);
+	__HAL_TIM_SET_PRESCALER(&htim17, 50);
 	HAL_TIM_Base_Start_IT(&htim17);
 
 	// Waits for the out of bounds button to be hit
@@ -699,14 +704,18 @@ void InitiateMotors()
 	Xcurrent = 0;
 	Xend = 0;
 	Ycurrent = 0;
-	Yend = -3200;
+	Yend = -10400;
 
-	HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
+	HAL_GPIO_WritePin(YDIR1_GPIO_Port, YDIR1_Pin, 0);
+	HAL_GPIO_WritePin(YDIR2_GPIO_Port, YDIR2_Pin, 0);
 	YDIR = 0;
-	__HAL_TIM_SET_PRESCALER(&htim17, 50);
+	__HAL_TIM_SET_PRESCALER(&htim17, 30);
 	HAL_TIM_Base_Start_IT(&htim17);
 
 	osSemaphoreAcquire(runningHandle, osWaitForever);
+
+	lcd_clear();
+	lcd_write_string("Y motor ready");
 
 	HAL_Delay(500);
 
@@ -715,14 +724,14 @@ void InitiateMotors()
 
 	// Sets the X end point, motor prescaler value and starts the motor
 	Xend = -99999999;
-	__HAL_TIM_SET_PRESCALER(&htim16, 200);
+	__HAL_TIM_SET_PRESCALER(&htim16, 50);
 	HAL_TIM_Base_Start_IT(&htim16);
 
 	// Waits for the out of bounds button to be hit
 	osSemaphoreAcquire(setupHandle, osWaitForever);
 	HAL_Delay(500);
 	Xcurrent = 0;
-	Xend = 3200;
+	Xend = 16500;
 	Ycurrent = 0;
 	Yend = 0;
 
@@ -733,6 +742,9 @@ void InitiateMotors()
 
 	osSemaphoreAcquire(runningHandle, osWaitForever);
 	setup--;
+
+	lcd_clear();
+	lcd_write_string("X motor ready");
 
 	HAL_Delay(500);
 
@@ -759,14 +771,21 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 			// Turns enable output on
 			HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin, 1);
-			HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin, 1);
+			HAL_GPIO_WritePin(YEN1_GPIO_Port, YEN1_Pin, 1);
+			HAL_GPIO_WritePin(YEN2_GPIO_Port, YEN2_Pin, 1);
+
+			while(1)
+			{
+				lcd_clear();
+				lcd_write_string("Out of Bounds");
+				HAL_Delay(10000);
+			}
 		}
 		else
 		{
 			if (XDIR == 0)
 			{
 				HAL_TIM_Base_Stop_IT(&htim16);
-
 			}
 			if (YDIR == 1)
 			{
@@ -884,7 +903,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		// If there is a value in Xcommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Xcommand[0] != '\0')
 		{
-			newExecutable.Xend = ((1600 / 43.39) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
+			newExecutable.Xend = ((6000 / 152) * atof(Xcommand));	// Converts Xcommand to an int, changes units to .1 mms and updates the global variable
 		}
 
 		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
@@ -896,7 +915,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		// If there is a value in Ycommand, it computes the end point of the system (1600 pulses per motor rotation, 43.39 mm per rotation)
 		if (Ycommand[0] != '\0')
 		{
-			newExecutable.Yend = ((1600 / 43.39) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
+			newExecutable.Yend = ((1600 / 40) * atof(Ycommand));	// Converts Ycommand to an int, changes units to .1 mms and updates the global variable
 		}
 
 		// If there is no value in Xcommand, Xend equals the current Xvalue (Xcurrent is a global variable that stores the X position that is currently being calculated
@@ -933,7 +952,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		{
 
 			// Calcualtes the required prescaler value and saves it in the Xspeed variable
-			newExecutable.Xspeed = 162712.482 / ((abs(Xdistance) / totalDistance) * feed);
+			newExecutable.Xspeed = 152014 / ((abs(Xdistance) / totalDistance) * feed);
 		}
 
 		// Ensures the distance won't be divided by 0
@@ -941,7 +960,7 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 		{
 
 			// Calculates the required prescaler value and saves it in the Yspeed variable
-			newExecutable.Yspeed = 162712.482 / ((abs(Ydistance) / totalDistance) * feed);
+			newExecutable.Yspeed = 150000 / ((abs(Ydistance) / totalDistance) * feed);
 		}
 
 		// Converters laserSpeed to an int
@@ -961,7 +980,6 @@ Executable ComputeExecutables(char Gcommand[], char Xcommand[], char Ycommand[],
 // Function to set the laser power. input must be a value from 0 to 255
 void SetLaserPower(uint8_t power) {
 
-	power = power / 2;
 	// the timer requires the duty cycle in a ratio from 0 to 80000
 	float dutyCycle = (power/255.0) * 80000;
     TIM2->CCR1 = dutyCycle;  // Set duty cycle
@@ -1003,12 +1021,14 @@ void SetOutputs(Executable output){
 	if (output.Yend > Ycurrent)
 	{
 		YDIR = 1;
-		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 1);
+		HAL_GPIO_WritePin(YDIR1_GPIO_Port, YDIR1_Pin, 1);
+		HAL_GPIO_WritePin(YDIR2_GPIO_Port, YDIR2_Pin, 1);
 	}
 	else if (output.Yend < Ycurrent)
 	{
 		YDIR = 0;
-		HAL_GPIO_WritePin(YDIR_GPIO_Port, YDIR_Pin, 0);
+		HAL_GPIO_WritePin(YDIR1_GPIO_Port, YDIR1_Pin, 0);
+		HAL_GPIO_WritePin(YDIR2_GPIO_Port, YDIR2_Pin, 0);
 	}
 
 	// Sets the prescaler values so the motors turn at the correct speed
@@ -1041,7 +1061,8 @@ void StartLaserEngrave(void *argument)
 	while (setup != 0) osDelay(1);
   // Ensures the enable pins are turned off to allow the motors to turn
   HAL_GPIO_WritePin(XEN_GPIO_Port, XEN_Pin,0);
-  HAL_GPIO_WritePin(YEN_GPIO_Port, YEN_Pin,0);
+  HAL_GPIO_WritePin(YEN1_GPIO_Port, YEN1_Pin,0);
+  HAL_GPIO_WritePin(YEN2_GPIO_Port, YEN2_Pin,0);
 
   // Declares the executable outside the for loop so that it doesn't have to be redeclared every time
   Executable newExecutable;
@@ -1126,13 +1147,6 @@ void StartControlTask(void *argument)
   for(;;)
   {
 
-//	  SetLaserPower(50);
-//
-//	  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
-//	  HAL_TIM_Base_Start_IT(&htim2);
-
-	  //while(1);
-
 	  //some variables for FatFs
 	  FATFS FatFs;    //Fatfs handle
 	  FRESULT fres;    //Result after operations
@@ -1142,7 +1156,8 @@ void StartControlTask(void *argument)
 	  //Open the file system
 	  fres = f_mount(&FatFs, "", 1); //1=mount now
 	  if (fres != FR_OK) {
-		myprintf("f_mount error (%i)\r\n", fres);
+		lcd_clear();
+		lcd_write_string("No SD card detected");
 		while(1);
 	  }
 
@@ -1173,33 +1188,26 @@ void StartControlTask(void *argument)
 	  } while(fno.fname[0] != 0);
 
 	  i = 0;
-//	  while(1)
-//	  {
-//		  lcd_clear();
-//		  lcd_set_cursor(0,0);
-//		  lcd_write_string("*");
-//		  lcd_write_string(fileNames[i]);
-//		  lcd_write_string("*");
-//		  lcd_set_cursor(1,0);
-//		  lcd_write_string(fileNames[i+1]);
-//		  HAL_Delay(300);
-//	  }
 
-
-
-
-	  fres = f_open(&fil, "sonic.txt", FA_READ);
+	  fres = f_open(&fil, "BYUI.g", FA_READ);
 	  if (fres != FR_OK){
-		myprintf("f_open error (%i)\r\n", fres);
-		while(1);
+		lcd_clear();
+		lcd_write_string("Wrong File");
+		while(1){}
 	  }
 
+	  lcd_clear();
+	  lcd_write_string("Motors Initiating");
 	  InitiateMotors();
+	  lcd_clear();
+	  lcd_write_string("Running program");
 	  osSemaphoreAcquire(RunFileHandle, osWaitForever);
 
 	  lcd_clear();
 	  lcd_write_string(("Program Complete!"));
 	  HAL_Delay(5000);
+	  while(1)
+	  {}
 
   }
   /* USER CODE END StartControlTask */
@@ -1258,10 +1266,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		if (Ycurrent != Yend)	// Evaluates if the Y motor has arrived in it's position
 		{
 
-			HAL_GPIO_TogglePin(YPUL_GPIO_Port, YPUL_Pin);	// Toggles the YPUL pin
+			HAL_GPIO_TogglePin(YPUL1_GPIO_Port, YPUL1_Pin);	// Toggles the YPUL pin
+			HAL_GPIO_TogglePin(YPUL2_GPIO_Port, YPUL2_Pin);
 
 			// Increments the Ycurrent value if YDIR is positive and decrements if Ycurrent value is negative
-			if (!HAL_GPIO_ReadPin(YPUL_GPIO_Port, YPUL_Pin))
+			if (!HAL_GPIO_ReadPin(YPUL1_GPIO_Port, YPUL1_Pin))
 			{
 				if (YDIR == 1) Ycurrent++;
 
